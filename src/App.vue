@@ -1,40 +1,133 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+import { Refresh } from "@element-plus/icons-vue";
+import DirectoryTree from "./components/DirectoryTree.vue";
 
-const greetMsg = ref("");
-const name = ref("");
+const activeTab = ref("disk");
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
+function refreshAll() {
+  // 刷新所有数据
+  console.log("刷新所有数据");
 }
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
+  <div class="app-container">
+    <el-header class="app-header">
+      <div class="header-content">
+        <h1 class="app-title">C盘空间管理工具</h1>
+        <div class="header-actions">
+          <el-button type="primary" :icon="Refresh" @click="refreshAll">
+            刷新全部
+          </el-button>
+        </div>
+      </div>
+    </el-header>
 
-    <div class="row">
-      <a href="https://vite.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
-    </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
+    <el-main class="app-main">
+      <el-tabs v-model="activeTab" class="main-tabs">
+        <el-tab-pane label="磁盘分析" name="disk">
+          <directory-tree />
+        </el-tab-pane>
+        <el-tab-pane label="系统信息" name="system">
+          <div class="system-info">
+            <h3>系统磁盘信息</h3>
+            <p>磁盘信息功能开发中...</p>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="设置" name="settings">
+          <div class="settings-panel">
+            <h3>应用设置</h3>
+            <p>设置功能开发中...</p>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+    </el-main>
 
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
-  </main>
+    <el-footer class="app-footer">
+      <div class="footer-content">
+        <span>C盘空间管理工具 v1.0.0</span>
+        <span>基于 Tauri + Vue + Element Plus</span>
+      </div>
+    </el-footer>
+  </div>
 </template>
+
+<style scoped>
+.app-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background-color: #409eff;
+  color: white;
+  padding: 0;
+  height: 60px !important;
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+  padding: 0 20px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.app-main {
+  flex: 1;
+  padding: 0;
+  background-color: #f5f7fa;
+}
+
+.main-tabs {
+  height: 100%;
+}
+
+.main-tabs :deep(.el-tabs__content) {
+  height: calc(100% - 55px);
+}
+
+.main-tabs :deep(.el-tab-pane) {
+  height: 100%;
+}
+
+.system-info, .settings-panel {
+  padding: 20px;
+  background: white;
+  border-radius: 4px;
+  margin: 10px;
+}
+
+.app-footer {
+  background-color: #f5f7fa;
+  border-top: 1px solid #e4e7ed;
+  padding: 0;
+  height: 40px !important;
+}
+
+.footer-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+  padding: 0 20px;
+  font-size: 12px;
+  color: #909399;
+}
+</style>
 
 <style scoped>
 .logo.vite:hover {
