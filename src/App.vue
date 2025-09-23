@@ -13,7 +13,7 @@ function refreshAll() {
 
 <template>
   <div class="app-container">
-    <el-header class="app-header">
+    <el-header class="app-header" height="60px">
       <div class="header-content">
         <h1 class="app-title">C盘空间管理工具</h1>
         <div class="header-actions">

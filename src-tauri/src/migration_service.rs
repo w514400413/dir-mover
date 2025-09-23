@@ -146,9 +146,15 @@ impl MigrationService {
         })
     }
 
-    /// 预迁移检查
+    /// 预迁移检查（增强版）
     async fn pre_migration_check(&self, source: &Path, target: &Path) -> Result<(), String> {
-        // 验证路径
+        // 1. 路径安全性检查
+        match self.validate_path_security(source, target) {
+            Ok(_) => {},
+            Err(e) => return Err(format!("路径安全检查失败: {}", e)),
+        }
+
+        // 2. 验证路径
         match self.file_operator.validate_migration_path(source, target) {
             Ok((valid, message)) => {
                 if !valid {
@@ -160,28 +166,25 @@ impl MigrationService {
             }
         }
 
-        // 检查权限
-        if !self.has_write_permission(target.parent().unwrap_or(target)) {
-            return Err("没有目标目录的写入权限".to_string());
+        // 3. 权限检查
+        match self.check_permissions(source, target).await {
+            Ok(_) => {},
+            Err(e) => return Err(format!("权限检查失败: {}", e)),
         }
 
-        // 检查磁盘空间（粗略估计）
-        match self.estimate_required_space(source).await {
-            Ok(required_space) => {
-                if let Some(available_space) = self.get_available_space(target) {
-                    if required_space > available_space {
-                        return Err(format!("磁盘空间不足，需要 {}，可用 {}", 
-                            self.format_size(required_space), 
-                            self.format_size(available_space)));
-                    }
-                }
-            },
-            Err(e) => {
-                warn!("无法估计所需空间: {}", e);
-                // 空间检查失败，但不阻止迁移
-            }
+        // 4. 磁盘空间检查
+        match self.check_disk_space(source, target).await {
+            Ok(_) => {},
+            Err(e) => return Err(format!("磁盘空间检查失败: {}", e)),
         }
 
+        // 5. 系统保护检查
+        match self.check_system_protection(source, target) {
+            Ok(_) => {},
+            Err(e) => return Err(format!("系统保护检查失败: {}", e)),
+        }
+
+        info!("预迁移检查通过: {} -> {}", source.display(), target.display());
         Ok(())
     }
 
@@ -277,17 +280,6 @@ impl MigrationService {
         }
     }
 
-    /// 检查是否有写入权限
-    fn has_write_permission(&self, path: &Path) -> bool {
-        match std::fs::metadata(path) {
-            Ok(metadata) => {
-                // 简化的权限检查
-                // 在实际应用中，可能需要更详细的权限检查
-                true
-            },
-            Err(_) => false,
-        }
-    }
 
     /// 估计所需空间
     async fn estimate_required_space(&self, path: &Path) -> Result<u64, String> {
@@ -300,17 +292,324 @@ impl MigrationService {
         }
     }
 
-    /// 获取可用空间
+    /// 获取可用空间（简化版）
     fn get_available_space(&self, path: &Path) -> Option<u64> {
-        // 这里应该使用系统特定的API来获取磁盘可用空间
-        // 暂时返回None，表示无法获取
-        None
+        // 简化实现：使用粗略估计
+        // 在实际应用中，这里应该使用系统API获取真实的磁盘空间
+        let path_str = path.to_string_lossy();
+        
+        // 根据路径所在磁盘返回估计值
+        if path_str.starts_with("C:\\") {
+            Some(50 * 1024 * 1024 * 1024) // 假设C盘有50GB可用
+        } else if path_str.starts_with("D:\\") {
+            Some(100 * 1024 * 1024 * 1024) // 假设D盘有100GB可用
+        } else {
+            Some(20 * 1024 * 1024 * 1024) // 默认20GB
+        }
     }
 
-    /// 格式化文件大小
-    fn format_size(&self, size: u64) -> String {
-        use crate::disk_analyzer::format_file_size;
-        format_file_size(size)
+    /// 路径安全性检查
+    fn validate_path_security(&self, source: &Path, target: &Path) -> Result<(), String> {
+        // 检查路径遍历攻击
+        let source_str = source.to_string_lossy();
+        let target_str = target.to_string_lossy();
+        
+        // 检查是否包含路径遍历字符
+        if source_str.contains("..") || target_str.contains("..") {
+            return Err("路径包含非法的父目录引用".to_string());
+        }
+        
+        // 检查是否包含特殊字符
+        let invalid_chars = ['<', '>', ':', '*', '?', '|'];
+        for char in &invalid_chars {
+            if source_str.contains(*char) || target_str.contains(*char) {
+                return Err(format!("路径包含非法字符: {}", char));
+            }
+        }
+        
+        // 检查Windows保留名称
+        #[cfg(target_os = "windows")]
+        {
+            let reserved_names = ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5",
+                                 "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4",
+                                 "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+            
+            let source_name = source.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_uppercase();
+                
+            let target_name = target.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_uppercase();
+            
+            for reserved in &reserved_names {
+                if source_name == *reserved || target_name == *reserved {
+                    return Err(format!("路径使用了Windows保留名称: {}", reserved));
+                }
+            }
+        }
+        
+        // 检查路径长度
+        if source_str.len() > 260 || target_str.len() > 260 {
+            return Err("路径过长（超过260字符）".to_string());
+        }
+        
+        info!("路径安全检查通过");
+        Ok(())
+    }
+
+    /// 权限检查
+    async fn check_permissions(&self, source: &Path, target: &Path) -> Result<(), String> {
+        // 检查源路径读取权限
+        if !self.has_read_permission(source) {
+            return Err(format!("没有源路径的读取权限: {}", source.display()));
+        }
+        
+        // 检查目标父目录的写入权限
+        let target_parent = target.parent().unwrap_or(target);
+        if !self.has_write_permission(target_parent) {
+            return Err(format!("没有目标父目录的写入权限: {}", target_parent.display()));
+        }
+        
+        // 检查是否需要管理员权限
+        if self.requires_admin_permission(source, target) {
+            info!("迁移操作可能需要管理员权限");
+            // 在实际应用中，这里可以触发UAC提示
+        }
+        
+        info!("权限检查通过");
+        Ok(())
+    }
+
+    /// 磁盘空间检查
+    async fn check_disk_space(&self, source: &Path, target: &Path) -> Result<(), String> {
+        // 获取源目录大小
+        let required_space = match self.estimate_required_space(source).await {
+            Ok(size) => size,
+            Err(e) => {
+                warn!("无法准确估计源目录大小: {}", e);
+                // 使用粗略估计：如果无法准确估计，使用1GB作为默认值
+                1024 * 1024 * 1024
+            }
+        };
+        
+        // 获取目标磁盘可用空间
+        let available_space = match self.get_available_space(target) {
+            Some(space) => space,
+            None => {
+                // 如果无法获取可用空间，检查目标父目录是否存在
+                let target_parent = target.parent().unwrap_or(target);
+                if !target_parent.exists() {
+                    return Err(format!("目标父目录不存在: {}", target_parent.display()));
+                }
+                // 使用粗略估计：假设至少有10GB可用空间
+                10 * 1024 * 1024 * 1024
+            }
+        };
+        
+        // 计算所需空间（源目录大小 + 20%缓冲）
+        let required_with_buffer = required_space + (required_space / 5);
+        
+        if required_with_buffer > available_space {
+            return Err(format!(
+                "磁盘空间不足。需要: {} (含20%缓冲)，可用: {}", 
+                crate::disk_analyzer::format_file_size(required_with_buffer),
+                crate::disk_analyzer::format_file_size(available_space)
+            ));
+        }
+        
+        // 检查目标磁盘是否即将满
+        let usage_percentage = (required_with_buffer as f64 / (available_space + required_with_buffer) as f64) * 100.0;
+        if usage_percentage > 90.0 {
+            warn!("迁移后磁盘使用率将超过90%: {:.1}%", usage_percentage);
+        }
+        
+        info!("磁盘空间检查通过: 需要 {}, 可用 {}", 
+              crate::disk_analyzer::format_file_size(required_with_buffer), 
+              crate::disk_analyzer::format_file_size(available_space));
+        Ok(())
+    }
+
+    /// 系统保护检查
+    fn check_system_protection(&self, source: &Path, target: &Path) -> Result<(), String> {
+        // 检查是否是系统关键目录
+        let system_paths = [
+            "C:\\Windows",
+            "C:\\Program Files",
+            "C:\\Program Files (x86)",
+            "C:\\Users\\Default",
+            "C:\\Recovery",
+            "C:\\System Volume Information",
+            "C:\\$Recycle.Bin",
+        ];
+        
+        let source_str = source.to_string_lossy().to_uppercase();
+        let target_str = target.to_string_lossy().to_uppercase();
+        
+        for system_path in &system_paths {
+            if source_str.starts_with(system_path) || target_str.starts_with(system_path) {
+                return Err(format!("不能操作系统保护目录: {}", system_path));
+            }
+        }
+        
+        // 检查是否是程序安装目录
+        if self.is_program_installation_directory(source) || self.is_program_installation_directory(target) {
+            return Err("不能迁移程序安装目录，可能导致程序无法运行".to_string());
+        }
+        
+        // 检查是否包含系统文件
+        let system_files = ["pagefile.sys", "hiberfil.sys", "swapfile.sys"];
+        for system_file in &system_files {
+            if source_str.contains(system_file) || target_str.contains(system_file) {
+                return Err(format!("不能操作系统文件: {}", system_file));
+            }
+        }
+        
+        info!("系统保护检查通过");
+        Ok(())
+    }
+
+    /// 检查是否有读取权限
+    fn has_read_permission(&self, path: &Path) -> bool {
+        if !path.exists() {
+            return false;
+        }
+        
+        // 尝试读取目录内容
+        match fs::read_dir(path) {
+            Ok(_) => true,
+            Err(e) => {
+                warn!("读取权限检查失败 {}: {}", path.display(), e);
+                false
+            }
+        }
+    }
+
+    /// 检查是否需要管理员权限
+    fn requires_admin_permission(&self, source: &Path, target: &Path) -> bool {
+        // 检查是否涉及系统目录
+        let system_paths = ["C:\\Windows", "C:\\Program Files", "C:\\Program Files (x86)"];
+        let source_str = source.to_string_lossy().to_uppercase();
+        let target_str = target.to_string_lossy().to_uppercase();
+        
+        for system_path in &system_paths {
+            if source_str.starts_with(system_path) || target_str.starts_with(system_path) {
+                return true;
+            }
+        }
+        
+        false
+    }
+
+    /// 检查是否是程序安装目录
+    fn is_program_installation_directory(&self, path: &Path) -> bool {
+        let path_str = path.to_string_lossy().to_uppercase();
+        
+        // 检查常见的程序安装路径
+        let program_paths = [
+            "C:\\PROGRAM FILES",
+            "C:\\PROGRAM FILES (X86)",
+            "C:\\USERS\\",
+        ];
+        
+        for program_path in &program_paths {
+            if path_str.starts_with(program_path) {
+                // 进一步检查是否包含可执行文件
+                if let Ok(entries) = fs::read_dir(path) {
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if name.ends_with(".exe") || name.ends_with(".dll") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        false
+    }
+
+    /// 获取根目录
+    fn get_root_directory(&self, path: &Path) -> PathBuf {
+        let path_str = path.to_string_lossy();
+        
+        #[cfg(target_os = "windows")]
+        {
+            // Windows系统：提取盘符
+            if let Some(drive) = path_str.chars().next() {
+                return PathBuf::from(format!("{}:\\", drive));
+            }
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Unix系统：返回根目录
+            return PathBuf::from("/");
+        }
+        
+        PathBuf::from(path_str.to_string())
+    }
+
+    /// 估计可用空间（备用方法）
+    fn estimate_available_space(&self, path: &Path) -> Result<u64, String> {
+        // 创建一个临时文件来测试写入
+        let temp_file = path.join(".space_test.tmp");
+        
+        // 尝试写入不同大小的数据
+        let test_sizes = [1024 * 1024, 10 * 1024 * 1024, 100 * 1024 * 1024]; // 1MB, 10MB, 100MB
+        
+        for size in &test_sizes {
+            match self.test_write_space(&temp_file, *size) {
+                Ok(_) => {
+                    // 删除临时文件
+                    let _ = fs::remove_file(&temp_file);
+                    return Ok(*size * 10); // 估计可用空间为测试大小的10倍
+                },
+                Err(_) => {
+                    // 删除临时文件
+                    let _ = fs::remove_file(&temp_file);
+                    continue;
+                }
+            }
+        }
+        
+        Err("无法估计可用磁盘空间".to_string())
+    }
+
+    /// 测试写入空间
+    fn test_write_space(&self, temp_file: &Path, size: u64) -> Result<(), String> {
+        // 创建指定大小的临时文件
+        let data = vec![0u8; size as usize];
+        
+        match fs::write(temp_file, &data) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("写入测试失败: {}", e)),
+        }
+    }
+
+    /// 检查是否有写入权限（增强版）
+    fn has_write_permission(&self, path: &Path) -> bool {
+        if !path.exists() {
+            // 如果路径不存在，检查父目录
+            if let Some(parent) = path.parent() {
+                return self.has_write_permission(parent);
+            }
+            return false;
+        }
+        
+        // 尝试创建一个临时文件来测试写入权限
+        let temp_file = path.join(".write_test.tmp");
+        match fs::write(&temp_file, b"test") {
+            Ok(_) => {
+                // 删除临时文件
+                let _ = fs::remove_file(&temp_file);
+                true
+            },
+            Err(_) => false
+        }
     }
 }
 

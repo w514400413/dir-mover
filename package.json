@@ -6,8 +6,23 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "build:prod": "vue-tsc --noEmit && vite build --config vite.config.prod.ts",
+    "build:analyze": "vue-tsc --noEmit && vite build --config vite.config.prod.ts && start dist/stats.html",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build": "tauri build",
+    "tauri:build:prod": "pnpm run build:prod && tauri build --config src-tauri/tauri.conf.prod.json",
+    "test": "echo \"No tests specified\" && exit 0",
+    "test:integration": "echo \"No integration tests specified\" && exit 0",
+    "lint": "echo \"No linter specified\" && exit 0",
+    "lint:fix": "echo \"No linter specified\" && exit 0",
+    "clean": "rd /s /q dist 2>nul || rm -rf dist && rd /s /q src-tauri/target 2>nul || rm -rf src-tauri/target",
+    "clean:all": "pnpm run clean && rd /s /q node_modules 2>nul || rm -rf node_modules && cd src-tauri && cargo clean && cd ..",
+    "release": "pnpm run tauri:build:prod",
+    "release:windows": "scripts/build.bat -p windows -m release",
+    "release:linux": "scripts/build.sh -p linux -m release",
+    "release:macos": "scripts/build.sh -p macos -m release",
+    "release:all": "scripts/build.sh -p all -m release"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
@@ -18,11 +33,14 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/node": "^24.5.2",
     "@vitejs/plugin-vue": "^5.2.1",
+    "rollup-plugin-visualizer": "^6.0.3",
     "typescript": "~5.6.2",
     "unplugin-auto-import": "^20.1.0",
     "unplugin-vue-components": "^29.1.0",
     "vite": "^6.0.3",
+    "vite-plugin-compression": "^0.5.1",
     "vue-tsc": "^2.1.10"
   }
 }

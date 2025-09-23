@@ -1,0 +1,191 @@
+version: '3.8'
+
+services:
+  # 构建服务
+  builder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final-builder
+    container_name: c-drive-space-manager-builder
+    volumes:
+      - ./dist:/app/output/dist
+      - ./src-tauri/target/release/bundle:/app/output/bundle
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=production
+      - TAURI_ENV=production
+      - BUILD_MODE=release
+    networks:
+      - builder-network
+    profiles:
+      - build
+
+  # 开发环境
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend-builder
+    container_name: c-drive-space-manager-dev
+    ports:
+      - "1420:1420"
+      - "1421:1421"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/src-tauri/target
+    environment:
+      - NODE_ENV=development
+      - TAURI_DEV_HOST=0.0.0.0
+    command: sh -c "pnpm install && pnpm dev"
+    networks:
+      - dev-network
+    profiles:
+      - dev
+
+  # 测试环境
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: rust-builder
+    container_name: c-drive-space-manager-test
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/src-tauri/target
+    environment:
+      - NODE_ENV=test
+      - RUST_BACKTRACE=1
+    command: sh -c "cd src-tauri && cargo test"
+    networks:
+      - test-network
+    profiles:
+      - test
+
+  # 文档服务
+  docs:
+    image: nginx:alpine
+    container_name: c-drive-space-manager-docs
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docs:/usr/share/nginx/html/docs
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    networks:
+      - docs-network
+    profiles:
+      - docs
+
+  # 发布服务器
+  release:
+    image: nginx:alpine
+    container_name: c-drive-space-manager-release
+    ports:
+      - "8081:80"
+    volumes:
+      - ./releases:/usr/share/nginx/html/releases
+      - ./nginx-release.conf:/etc/nginx/nginx.conf
+    networks:
+      - release-network
+    profiles:
+      - release
+
+  # 数据库服务（可选）
+  database:
+    image: postgres:15-alpine
+    container_name: c-drive-space-manager-db
+    environment:
+      - POSTGRES_DB=dir_mover
+      - POSTGRES_USER=dir_mover
+      - POSTGRES_PASSWORD=dir_mover_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - database-network
+    profiles:
+      - database
+
+  # 缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: c-drive-space-manager-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - cache-network
+    profiles:
+      - cache
+
+  # 监控服务
+  monitor:
+    image: prom/prometheus:latest
+    container_name: c-drive-space-manager-monitor
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - monitor-network
+    profiles:
+      - monitor
+
+  # 日志服务
+  logs:
+    image: grafana/loki:latest
+    container_name: c-drive-space-manager-logs
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - logs-network
+    profiles:
+      - logs
+
+networks:
+  builder-network:
+    driver: bridge
+  dev-network:
+    driver: bridge
+  test-network:
+    driver: bridge
+  docs-network:
+    driver: bridge
+  release-network:
+    driver: bridge
+  database-network:
+    driver: bridge
+  cache-network:
+    driver: bridge
+  monitor-network:
+    driver: bridge
+  logs-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local

@@ -19,6 +19,12 @@ pub struct ScanProgress {
     pub processed_files: u64,
     pub total_files: u64,
     pub progress: f64,
+    pub processed_directories: u64, // 新增：已处理目录数
+    pub total_directories: u64,     // 新增：总目录数
+    pub current_directory: String,  // 新增：当前处理的目录
+    pub estimated_time_remaining: u64, // 新增：预计剩余时间（秒）
+    pub scan_speed: f64,            // 新增：扫描速度（文件/秒）
+    pub large_folders_found: u64,   // 新增：发现的大文件夹数量
 }
 
 /// 磁盘信息

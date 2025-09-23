@@ -1,0 +1,115 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "C-drive空间管理器",
+  "version": "1.0.0",
+  "identifier": "com.dir-mover.c-drive-space-manager",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build:prod",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "C-drive空间管理器",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "decorations": true,
+        "transparent": false,
+        "fullscreen": false,
+        "visible": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "theme": "Windows",
+        "titleBarStyle": "Visible"
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "'self' ipc: http://ipc.localhost",
+        "script-src": "'self' 'unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' asset: http://asset.localhost",
+        "font-src": "'self' asset: http://asset.localhost"
+      },
+      "capabilities": [
+        "default"
+      ]
+    },
+    "withGlobalTauri": false,
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true,
+      "menuOnLeftClick": false,
+      "title": "C-drive空间管理器"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis", "dmg", "app", "deb", "rpm", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "copyright": "Copyright © 2024 Dir-Mover Technologies. All rights reserved.",
+    "category": "Utility",
+    "shortDescription": "专业的C盘空间管理工具",
+    "longDescription": "C-drive空间管理器是一款专业的磁盘空间管理工具，帮助用户分析和优化C盘空间使用，提供文件迁移、符号链接管理等功能。",
+    "deb": {
+      "depends": [],
+      "useBootstrapper": false
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.13",
+      "license": "LICENSE",
+      "useBootstrapper": false,
+      "signingIdentity": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "tsp": false,
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "allowDowngrades": false,
+      "wix": {
+        "language": "zh-CN",
+        "template": "wix/template.wxs"
+      },
+      "nsis": {
+        "template": "nsis/installer.nsi",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHeaderIcon": "icons/icon.ico",
+        "license": "LICENSE",
+        "installMode": "currentUser",
+        "allowToChangeInstallationDirectory": true,
+        "oneClick": false,
+        "createDesktopShortcut": true,
+        "createStartMenuShortcut": true,
+        "shortcutName": "C-drive空间管理器"
+      }
+    }
+  },
+  "plugins": {
+    "opener": {}
+  }
+}

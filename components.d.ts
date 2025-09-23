@@ -10,26 +10,10 @@ declare module 'vue' {
   export interface GlobalComponents {
     ContextMenu: typeof import('./src/components/ContextMenu.vue')['default']
     DirectoryTree: typeof import('./src/components/DirectoryTree.vue')['default']
-    ElAlert: typeof import('element-plus/es')['ElAlert']
-    ElButton: typeof import('element-plus/es')['ElButton']
-    ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
-    ElDialog: typeof import('element-plus/es')['ElDialog']
-    ElDivider: typeof import('element-plus/es')['ElDivider']
-    ElFooter: typeof import('element-plus/es')['ElFooter']
-    ElHeader: typeof import('element-plus/es')['ElHeader']
-    ElIcon: typeof import('element-plus/es')['ElIcon']
-    ElInput: typeof import('element-plus/es')['ElInput']
-    ElMain: typeof import('element-plus/es')['ElMain']
-    ElOption: typeof import('element-plus/es')['ElOption']
-    ElProgress: typeof import('element-plus/es')['ElProgress']
-    ElSelect: typeof import('element-plus/es')['ElSelect']
-    ElTable: typeof import('element-plus/es')['ElTable']
-    ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
-    ElTabPane: typeof import('element-plus/es')['ElTabPane']
-    ElTabs: typeof import('element-plus/es')['ElTabs']
+    ErrorRecoveryMonitor: typeof import('./src/components/ErrorRecoveryMonitor.vue')['default']
     MigrationDialog: typeof import('./src/components/MigrationDialog.vue')['default']
-  }
-  export interface GlobalDirectives {
-    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
+    OperationLogViewer: typeof import('./src/components/OperationLogViewer.vue')['default']
+    PerformanceMonitor: typeof import('./src/components/PerformanceMonitor.vue')['default']
+    TestManager: typeof import('./src/components/TestManager.vue')['default']
   }
 }

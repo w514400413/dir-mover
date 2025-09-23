@@ -1,0 +1,173 @@
+[package]
+name = "c-drive-space-manager"
+version = "1.0.0"
+description = "专业的C盘空间管理工具"
+authors = ["Dir-Mover Technologies <support@dir-mover.com>"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/dir-mover/c-drive-space-manager"
+homepage = "https://dir-mover.com"
+documentation = "https://docs.dir-mover.com"
+keywords = ["disk", "space", "manager", "tauri", "c-drive"]
+categories = ["filesystem", "utilities"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "c_drive_space_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+# Tauri核心
+tauri = { version = "2.0.0", features = ["tray-icon", "compression"] }
+tauri-plugin-opener = "2.0.0"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 异步运行时
+tokio = { version = "1.0", features = ["full"] }
+
+# 日志系统
+log = "0.4"
+simplelog = "0.12"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+time = { version = "0.3", features = ["formatting", "local-offset"] }
+
+# 系统相关
+dirs = "5.0"
+whoami = "1.4"
+uuid = { version = "1.0", features = ["v4"] }
+
+# 缓存
+lru = "0.12"
+
+# 文件系统监控
+notify = "6.0"
+
+# 性能优化
+rayon = "1.7"
+
+# 错误处理
+thiserror = "1.0"
+anyhow = "1.0"
+
+# 配置管理
+config = "0.14"
+
+# 压缩
+flate2 = "1.0"
+
+# 网络请求
+reqwest = { version = "0.11", features = ["json"] }
+
+# 数据库（可选）
+rusqlite = { version = "0.30", features = ["bundled"], optional = true }
+
+# 加密（可选）
+aes-gcm = { version = "0.10", optional = true }
+
+[dev-dependencies]
+# 测试框架
+tempfile = "3.8"
+sysinfo = "0.29"
+criterion = "0.5"
+proptest = "1.0"
+mockall = "0.11"
+
+# 代码质量
+rustfmt = "0.10"
+clippy = "0.0.302"
+
+[features]
+# 默认特性
+default = ["sqlite", "encryption"]
+
+# SQLite数据库支持
+sqlite = ["rusqlite"]
+
+# 加密支持
+encryption = ["aes-gcm"]
+
+# 企业版特性
+enterprise = ["sqlite", "encryption", "advanced-logging"]
+
+# 高级日志
+advanced-logging = []
+
+# 性能分析
+profiling = []
+
+[profile.dev]
+# 开发环境优化
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = 'unwind'
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.release]
+# 发布环境优化
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = 'abort'
+incremental = false
+codegen-units = 1
+rpath = false
+strip = true
+
+[profile.test]
+# 测试环境配置
+opt-level = 0
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = 'unwind'
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.bench]
+# 基准测试配置
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = true
+panic = 'abort'
+incremental = false
+codegen-units = 1
+rpath = false
+
+# 依赖项优化
+[patch.crates-io]
+# 可以在这里覆盖依赖项版本
+
+# 工作空间配置
+[workspace]
+members = [
+  ".",
+]
+
+# 元数据
+[package.metadata]
+maintainer = "Dir-Mover Technologies"
+maintainer-email = "support@dir-mover.com"
+vendor = "Dir-Mover Technologies"
+homepage = "https://dir-mover.com"
+summary = "专业的C盘空间管理工具"
+license-file = ["LICENSE", "0"]
