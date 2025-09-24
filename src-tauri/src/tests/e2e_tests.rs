@@ -1,19 +1,19 @@
 //! 端到端测试模块
-//! 
+//!
 //! 测试完整的用户场景和工作流程
 
 use crate::disk_analyzer::DiskAnalyzer;
 use crate::file_operations::FileOperator;
 use crate::migration_service::{MigrationService, MigrationOptions};
-use crate::error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig};
-use crate::operation_logger::{OperationLogger, OperationType};
+use crate::error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig, RecoveryContext};
+use crate::operation_logger::{OperationLogger, OperationType, OperationStatus};
+use crate::tests::test_utils::create_test_directory_structure;
 use tempfile::TempDir;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use log::info;
-use tokio::time::sleep;
 
 /// 完整迁移流程测试
 pub async fn test_complete_migration_workflow() -> Result<(), crate::tests::TestError> {

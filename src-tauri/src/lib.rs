@@ -291,7 +291,7 @@ async fn run_test_suite(test_type: String, state: State<'_, AppState>) -> Result
         _ => return Err(format!("未知的测试类型: {}", test_type)),
     };
     
-    Ok(statistics)
+    Ok(statistics.clone())
 }
 
 /// 生成测试报告
@@ -359,6 +359,66 @@ async fn test_error_recovery(state: State<'_, AppState>) -> Result<bool, String>
     info!("测试错误分类: {:?}", error_type);
     
     Ok(true)
+}
+
+/// 获取性能统计信息
+#[tauri::command]
+async fn get_performance_stats(state: State<'_, AppState>) -> Result<performance_optimizer::PerformanceStats, String> {
+    let optimizer = state.performance_optimizer.clone();
+    let optimizer = optimizer.lock().await;
+    
+    Ok(optimizer.get_performance_stats())
+}
+
+/// 优化磁盘扫描
+#[tauri::command]
+async fn optimize_disk_scan(path: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let optimizer = state.performance_optimizer.clone();
+    let optimizer = optimizer.lock().await;
+    
+    let path = std::path::Path::new(&path);
+    optimizer.optimize_scan_operation(path, || {
+        // 这里执行实际的扫描优化逻辑
+        true
+    });
+    
+    Ok(true)
+}
+
+/// 运行内存清理
+#[tauri::command]
+async fn run_memory_cleanup(state: State<'_, AppState>) -> Result<bool, String> {
+    let optimizer = state.performance_optimizer.clone();
+    let optimizer = optimizer.lock().await;
+    
+    if optimizer.should_periodic_cleanup() {
+        optimizer.perform_cleanup().await;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
+/// 获取性能基准测试
+#[tauri::command]
+async fn get_performance_benchmark(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let optimizer = state.performance_optimizer.clone();
+    let optimizer = optimizer.lock().await;
+    
+    let stats = optimizer.get_performance_stats();
+    
+    // 创建基准测试报告
+    let benchmark = serde_json::json!({
+        "memory_usage_mb": stats.memory_usage_mb,
+        "memory_peak_mb": stats.memory_peak_mb,
+        "cache_hit_rate": stats.cache_hit_rate,
+        "cache_size": stats.cache_size,
+        "batch_queue_size": stats.batch_queue_size,
+        "last_cleanup_seconds_ago": stats.last_cleanup_seconds_ago,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    });
+    
+    Ok(benchmark)
 }
 
 /// 初始化日志系统

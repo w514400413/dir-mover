@@ -1,11 +1,12 @@
 //! 性能优化器模块
-//! 
+//!
 //! 提供内存优化、缓存管理、并发控制等性能优化功能
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
+use std::fs;
 use log::{info, warn, debug};
 use lru::LruCache;
 use tokio::sync::Semaphore;
@@ -87,12 +88,18 @@ impl MemoryMonitor {
 
     /// 获取当前内存使用
     pub fn get_current_usage(&self) -> usize {
-        self.current_usage.lock().unwrap_or_else(|_| std::sync::MutexGuard::leak(std::sync::Mutex::new(0)).clone())
+        match self.current_usage.lock() {
+            Ok(guard) => *guard,
+            Err(_) => 0,
+        }
     }
 
     /// 获取峰值内存使用
     pub fn get_peak_usage(&self) -> usize {
-        self.peak_usage.lock().unwrap_or_else(|_| std::sync::MutexGuard::leak(std::sync::Mutex::new(0)).clone())
+        match self.peak_usage.lock() {
+            Ok(guard) => *guard,
+            Err(_) => 0,
+        }
     }
 
     /// 检查是否需要内存清理
@@ -162,8 +169,14 @@ impl DirectoryCache {
 
     /// 获取缓存统计
     pub fn get_stats(&self) -> CacheStats {
-        let hit_count = self.hit_count.lock().unwrap_or(0);
-        let miss_count = self.miss_count.lock().unwrap_or(1);
+        let hit_count = match self.hit_count.lock() {
+            Ok(guard) => *guard,
+            Err(_) => 0,
+        };
+        let miss_count = match self.miss_count.lock() {
+            Ok(guard) => *guard,
+            Err(_) => 1,
+        };
         let total_requests = hit_count + miss_count;
         
         CacheStats {
@@ -246,8 +259,8 @@ impl BatchProcessor {
     }
 
     /// 获取信号量用于并发控制
-    pub fn acquire_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
-        self.semaphore.clone().acquire_owned().blocking_get().unwrap()
+    pub async fn acquire_permit(&self) -> tokio::sync::OwnedSemaphorePermit {
+        self.semaphore.clone().acquire_owned().await.unwrap()
     }
 }
 
@@ -318,7 +331,7 @@ impl PerformanceOptimizer {
             }
 
             // 获取并发许可
-            let _permit = self.batch_processor.acquire_permit();
+            let _permit = self.batch_processor.acquire_permit().await;
             
             // 执行操作
             let result = operation(item).await;
@@ -329,7 +342,7 @@ impl PerformanceOptimizer {
     }
 
     /// 执行内存清理
-    async fn perform_cleanup(&self) {
+    pub async fn perform_cleanup(&self) {
         info!("执行内存清理...");
         
         // 清理缓存
@@ -383,7 +396,7 @@ impl PerformanceOptimizer {
 }
 
 /// 性能统计
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PerformanceStats {
     pub memory_usage_mb: f64,
     pub memory_peak_mb: f64,
@@ -414,10 +427,10 @@ impl MemoryOptimizedScanner {
         mut process_chunk: F,
     ) -> Result<(), String>
     where
-        F: FnMut(Vec<fs::DirEntry>) -> Fut,
+        F: FnMut(Vec<std::fs::DirEntry>) -> Fut,
         Fut: std::future::Future<Output = Result<(), String>>,
     {
-        let entries = fs::read_dir(path)
+        let entries = std::fs::read_dir(path)
             .map_err(|e| format!("读取目录失败: {}", e))?;
         
         let mut chunk = Vec::with_capacity(self.chunk_size);
@@ -428,14 +441,12 @@ impl MemoryOptimizedScanner {
             
             if chunk.len() >= self.chunk_size {
                 // 处理当前批次
-                process_chunk(chunk.clone()).await?;
+                let chunk_to_process = std::mem::take(&mut chunk);
+                process_chunk(chunk_to_process).await?;
                 
                 // 记录内存使用
-                let chunk_memory = chunk.len() * std::mem::size_of::<fs::DirEntry>();
+                let chunk_memory = chunk.len() * std::mem::size_of::<std::fs::DirEntry>();
                 self.optimizer.memory_monitor.record_usage(chunk_memory);
-                
-                // 清空批次
-                chunk.clear();
                 
                 // 检查是否需要清理内存
                 if self.optimizer.memory_monitor.should_cleanup() {
@@ -515,7 +526,7 @@ pub struct SmartBatchItem {
     pub dependencies: Vec<String>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ProcessingStats {
     pub total_processed: usize,
     pub total_size_processed: u64,
@@ -566,8 +577,9 @@ impl SmartBatchProcessor {
             while let Some(item) = queue.pop_front() {
                 // 检查依赖项是否已处理
                 if self.check_dependencies(&item) {
-                    // 检查批次大小限制
-                    if total_size + item.estimated_size > self.config.max_rollback_size_mb * 1024 * 1024 {
+                    // 检查批次大小限制 - 使用 max_memory_usage_mb 作为回退
+                    let max_batch_size = (self.config.max_memory_usage_mb as u64) * 1024 * 1024 / 2; // 使用50%的内存限制
+                    if total_size + item.estimated_size > max_batch_size {
                         // 如果超过批次大小限制，将项目放回队列
                         queue.push_front(item);
                         break;
@@ -632,7 +644,9 @@ impl SmartBatchProcessor {
 
     /// 获取处理统计
     pub fn get_processing_stats(&self) -> ProcessingStats {
-        self.processing_stats.lock().unwrap_or_default().clone()
+        self.processing_stats.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|_| ProcessingStats::default())
     }
 }
 

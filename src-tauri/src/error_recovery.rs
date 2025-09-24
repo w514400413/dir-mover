@@ -32,7 +32,7 @@ pub enum ErrorSeverity {
 }
 
 /// 恢复策略
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RecoveryStrategy {
     Retry(u32), // 重试次数
     Rollback,   // 回滚
@@ -333,7 +333,8 @@ impl ErrorRecoveryManager {
     ) -> Result<BackupInfo, BackupError> {
         
         // 检查备份大小限制
-        let source_size = self.calculate_directory_size(source_path)?;
+        let source_size = self.calculate_directory_size(source_path)
+            .map_err(|e| BackupError::BackupFailed(format!("计算目录大小失败: {}", e)))?;
         let max_backup_size = self.config.max_rollback_size_mb * 1024 * 1024;
         
         if source_size > max_backup_size {
@@ -704,7 +705,7 @@ pub struct RecoveryResult {
 }
 
 /// 恢复类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum RecoveryType {
     Retry,
     Rollback,

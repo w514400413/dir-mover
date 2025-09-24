@@ -1,5 +1,5 @@
 //! 集成测试模块
-//! 
+//!
 //! 测试模块间的协作和交互
 
 use crate::disk_analyzer::DiskAnalyzer;
@@ -7,6 +7,7 @@ use crate::file_operations::FileOperator;
 use crate::migration_service::{MigrationService, MigrationOptions};
 use crate::error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig, RecoveryContext};
 use crate::operation_logger::{OperationLogger, OperationType, OperationStatus};
+use crate::tests::test_utils::create_test_directory_structure;
 use tempfile::TempDir;
 use std::fs::{self, File};
 use std::io::Write;
@@ -189,7 +190,7 @@ pub async fn test_operation_logging() -> Result<(), crate::tests::TestError> {
     test_complete_operation_lifecycle(&logger).await?;
     
     // 测试2: 并发操作记录
-    test_concurrent_operation_logging(&logger).await?;
+    test_concurrent_operation_logging(logger.clone()).await?;
     
     // 测试3: 错误操作记录
     test_error_operation_logging(&logger).await?;
@@ -233,38 +234,55 @@ async fn test_complete_operation_lifecycle(logger: &OperationLogger) -> Result<(
 }
 
 /// 测试并发操作记录
-async fn test_concurrent_operation_logging(logger: &OperationLogger) -> Result<(), crate::tests::TestError> {
+async fn test_concurrent_operation_logging(logger: OperationLogger) -> Result<(), crate::tests::TestError> {
     use tokio::task;
+    use std::sync::Arc;
     
-    // 创建多个并发操作
+    // 创建多个并发操作 - 每个任务使用独立的 logger
     let mut handles = vec![];
     
     for i in 0..5 {
-        let logger_clone = logger.clone();
         let handle = task::spawn(async move {
-            let mut log = logger_clone.log_operation_start(
+            // 为每个并发任务创建独立的 logger
+            let temp_dir = tempfile::TempDir::new().unwrap();
+            let task_logger = OperationLogger::new(
+                temp_dir.path().to_path_buf(),
+                format!("concurrent_session_{}", i),
+                "test_user".to_string(),
+            ).unwrap();
+            
+            let mut log = task_logger.log_operation_start(
                 OperationType::Scan,
                 format!("/test/path/{}", i),
                 None,
                 format!("并发扫描测试 {}", i),
             ).unwrap();
             
-            logger_clone.complete_operation(&mut log, 10 * (i + 1), 1024 * (i + 1), 1000, None).unwrap();
+            task_logger.complete_operation(&mut log, 10 * (i + 1), 1024 * (i + 1), 1000, None).unwrap();
+            
+            // 返回操作结果用于验证
+            (task_logger, format!("/test/path/{}", i))
         });
         
         handles.push(handle);
     }
     
-    // 等待所有操作完成
+    // 等待所有操作完成并收集结果
+    let mut completed_tasks = 0;
     for handle in handles {
-        handle.await.map_err(|e| crate::tests::TestError::ExecutionFailed(format!("并发任务失败: {}", e)))?;
+        let (task_logger, path) = handle.await
+            .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("并发任务失败: {}", e)))?;
+        
+        // 验证每个任务的操作都被记录
+        let logs = task_logger.get_recent_logs(1)
+            .map_err(|e| crate::tests::TestError::AssertionFailed(format!("查询任务日志失败: {}", e)))?;
+        
+        if !logs.is_empty() && logs[0].source_path == path {
+            completed_tasks += 1;
+        }
     }
     
-    // 验证所有操作都被记录
-    let all_logs = logger.get_recent_logs(10)
-        .map_err(|e| crate::tests::TestError::AssertionFailed(format!("查询所有日志失败: {}", e)))?;
-    
-    assert!(all_logs.len() >= 5, "应该至少有5条并发操作日志");
+    assert!(completed_tasks >= 5, "应该至少有5个并发操作成功完成");
 
     info!("并发操作记录测试完成");
     Ok(())

@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use log::info;
-use sysinfo::{System, SystemExt, ProcessExt};
+use sysinfo::{System, SystemExt, ProcessExt, CpuExt};
 
 /// 磁盘扫描性能测试
 pub async fn test_disk_scan_performance() -> Result<(), crate::tests::TestError> {
@@ -38,7 +38,7 @@ pub async fn test_disk_scan_performance() -> Result<(), crate::tests::TestError>
         // 监控系统资源
         system.refresh_all();
         let memory_before = system.used_memory();
-        let cpu_before = system.global_cpu_info().cpu_usage();
+        let cpu_before = system.global_cpu_info().cpu_usage(); // 这将返回 0-100 的值
 
         // 执行扫描
         let analyzer = DiskAnalyzer::new();
@@ -52,10 +52,10 @@ pub async fn test_disk_scan_performance() -> Result<(), crate::tests::TestError>
         // 监控系统资源
         system.refresh_all();
         let memory_after = system.used_memory();
-        let cpu_after = system.global_cpu_info().cpu_usage();
+        let cpu_after = system.global_cpu_info().cpu_usage(); // 这将返回 0-100 的值
         
         let memory_used = memory_after.saturating_sub(memory_before);
-        let cpu_usage = cpu_after - cpu_before;
+        let cpu_usage = if cpu_after > cpu_before { cpu_after - cpu_before } else { 0.0 };
 
         // 计算性能指标
         let scan_rate = result.file_count as f64 / scan_duration.as_secs_f64();
@@ -63,13 +63,13 @@ pub async fn test_disk_scan_performance() -> Result<(), crate::tests::TestError>
 
         let perf_result = PerformanceResult {
             test_name: format!("DiskScan_{}", size_name),
-            file_count: result.file_count,
+            file_count: result.file_count as usize,
             total_size: result.size,
             duration: scan_duration,
             scan_rate,
             throughput_mbps: throughput,
             memory_used_mb: memory_used as f64 / (1024.0 * 1024.0),
-            cpu_usage_percent: cpu_usage,
+            cpu_usage_percent: cpu_usage as f32,
         };
 
         results.push(perf_result);
@@ -114,7 +114,7 @@ pub async fn test_migration_performance() -> Result<(), crate::tests::TestError>
         // 监控系统资源
         system.refresh_all();
         let memory_before = system.used_memory();
-        let cpu_before = system.global_cpu_info().cpu_usage();
+        let cpu_before = system.global_cpu_info().cpu_usage(); // 这将返回 0-100 的值
 
         // 执行迁移
         let service = MigrationService::new();
@@ -135,10 +135,10 @@ pub async fn test_migration_performance() -> Result<(), crate::tests::TestError>
         // 监控系统资源
         system.refresh_all();
         let memory_after = system.used_memory();
-        let cpu_after = system.global_cpu_info().cpu_usage();
+        let cpu_after = system.global_cpu_info().cpu_usage(); // 这将返回 0-100 的值
         
         let memory_used = memory_after.saturating_sub(memory_before);
-        let cpu_usage = cpu_after - cpu_before;
+        let cpu_usage = if cpu_after > cpu_before { cpu_after - cpu_before } else { 0.0 };
 
         // 计算性能指标
         let total_size = (file_count * file_size) as u64;
@@ -153,7 +153,7 @@ pub async fn test_migration_performance() -> Result<(), crate::tests::TestError>
             scan_rate: migrate_rate,
             throughput_mbps: throughput,
             memory_used_mb: memory_used as f64 / (1024.0 * 1024.0),
-            cpu_usage_percent: cpu_usage,
+            cpu_usage_percent: cpu_usage as f32,
         };
 
         results.push(perf_result);
@@ -297,7 +297,7 @@ pub async fn test_large_file_performance() -> Result<(), crate::tests::TestError
         // 监控系统资源
         system.refresh_all();
         let memory_before = system.used_memory();
-        let cpu_before = system.global_cpu_info().cpu_usage();
+        let cpu_before = system.global_cpu_info().cpu_usage(); // 这将返回 0-100 的值
 
         // 执行迁移
         let service = MigrationService::new();
@@ -318,10 +318,10 @@ pub async fn test_large_file_performance() -> Result<(), crate::tests::TestError
         // 监控系统资源
         system.refresh_all();
         let memory_after = system.used_memory();
-        let cpu_after = system.global_cpu_info().cpu_usage();
+        let cpu_after = system.global_cpu_info().cpu_usage(); // 这将返回 0-100 的值
         
         let memory_used = memory_after.saturating_sub(memory_before);
-        let cpu_usage = cpu_after - cpu_before;
+        let cpu_usage = if cpu_after > cpu_before { cpu_after - cpu_before } else { 0.0 };
 
         // 计算性能指标
         let throughput = file_size as f64 / migrate_duration.as_secs_f64() / (1024.0 * 1024.0); // MB/s
@@ -334,7 +334,7 @@ pub async fn test_large_file_performance() -> Result<(), crate::tests::TestError
             scan_rate: 1.0 / migrate_duration.as_secs_f64(),
             throughput_mbps: throughput,
             memory_used_mb: memory_used as f64 / (1024.0 * 1024.0),
-            cpu_usage_percent: cpu_usage,
+            cpu_usage_percent: cpu_usage as f32,
         };
 
         results.push(perf_result);

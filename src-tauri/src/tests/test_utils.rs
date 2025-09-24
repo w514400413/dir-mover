@@ -3,8 +3,10 @@
 //! 提供测试所需的通用工具函数和辅助结构
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use std::fs::File;
+use std::io::Write;
 use log::{info, warn};
 use tempfile::TempDir;
 
@@ -28,7 +30,7 @@ impl TestDataGenerator {
     /// 生成标准测试目录结构
     pub fn create_standard_structure(&self, name: &str) -> Result<PathBuf, std::io::Error> {
         let base_path = self.temp_dir.path().join(name);
-        create_standard_test_structure(&base_path)?;
+        create_test_directory_structure(&base_path)?;
         Ok(base_path)
     }
 
@@ -390,7 +392,7 @@ impl RandomDataGenerator {
 }
 
 /// 标准测试目录结构创建函数
-pub fn create_standard_test_structure(base_path: &Path) -> Result<(), std::io::Error> {
+pub fn create_test_directory_structure(base_path: &Path) -> Result<(), std::io::Error> {
     // 创建基础目录
     fs::create_dir_all(base_path)?;
 

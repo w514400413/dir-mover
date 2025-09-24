@@ -56,12 +56,15 @@ pub async fn test_disk_analyzer() -> Result<(), crate::tests::TestError> {
     // 测试4: 取消扫描功能
     let analyzer = DiskAnalyzer::new();
     
+    // 克隆分析器用于异步任务
+    let analyzer_clone = analyzer.clone();
+    
     // 启动扫描
     let scan_task = tokio::spawn(async move {
-        analyzer.scan_directory_async(&test_dir).await
+        analyzer_clone.scan_directory_async(&test_dir).await
     });
     
-    // 立即取消
+    // 立即取消原始分析器
     analyzer.cancel_scan();
     
     // 等待任务完成

@@ -15,7 +15,7 @@ use log::{info, error};
 use std::time::Instant;
 
 /// 测试结果统计
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TestStatistics {
     pub total_tests: u32,
     pub passed_tests: u32,
@@ -96,114 +96,60 @@ impl TestRunner {
 
     /// 运行单元测试
     pub async fn run_unit_tests(&mut self) {
-        let tests = vec![
-            ("磁盘分析器单元测试", unit_tests::test_disk_analyzer),
-            ("文件操作单元测试", unit_tests::test_file_operations),
-            ("迁移服务单元测试", unit_tests::test_migration_service),
-            ("错误恢复单元测试", unit_tests::test_error_recovery),
-            ("操作日志单元测试", unit_tests::test_operation_logger),
-        ];
+        self.run_test("磁盘分析器单元测试", || unit_tests::test_disk_analyzer()).await;
+        self.run_test("文件操作单元测试", || unit_tests::test_file_operations()).await;
+        self.run_test("迁移服务单元测试", || unit_tests::test_migration_service()).await;
+        self.run_test("错误恢复单元测试", || unit_tests::test_error_recovery()).await;
+        self.run_test("操作日志单元测试", || unit_tests::test_operation_logger()).await;
+    }
 
-        for (test_name, test_func) in tests {
-            let start_time = Instant::now();
-            let result = test_func().await;
-            let duration = start_time.elapsed().as_millis() as u64;
+    /// 运行单个测试
+    async fn run_test<F, Fut>(&mut self, test_name: &str, test_func: F)
+    where
+        F: FnOnce() -> Fut + Send,
+        Fut: std::future::Future<Output = Result<(), TestError>> + Send,
+    {
+        let start_time = Instant::now();
+        let result = test_func().await;
+        let duration = start_time.elapsed().as_millis() as u64;
 
-            match result {
-                Ok(_) => {
-                    info!("✅ {} - 通过 ({}ms)", test_name, duration);
-                    self.statistics.add_result(true, false, duration);
-                },
-                Err(e) => {
-                    error!("❌ {} - 失败: {} ({}ms)", test_name, e, duration);
-                    self.statistics.add_result(false, false, duration);
-                },
-            }
+        match result {
+            Ok(_) => {
+                info!("✅ {} - 通过 ({}ms)", test_name, duration);
+                self.statistics.add_result(true, false, duration);
+            },
+            Err(e) => {
+                error!("❌ {} - 失败: {} ({}ms)", test_name, e, duration);
+                self.statistics.add_result(false, false, duration);
+            },
         }
     }
 
     /// 运行集成测试
     pub async fn run_integration_tests(&mut self) {
-        let tests = vec![
-            ("扫描和迁移集成测试", integration_tests::test_scan_and_migrate),
-            ("错误处理和恢复集成测试", integration_tests::test_error_handling_and_recovery),
-            ("操作日志集成测试", integration_tests::test_operation_logging),
-            ("路径验证集成测试", integration_tests::test_path_validation),
-            ("备份和回滚集成测试", integration_tests::test_backup_and_rollback),
-        ];
-
-        for (test_name, test_func) in tests {
-            let start_time = Instant::now();
-            let result = test_func().await;
-            let duration = start_time.elapsed().as_millis() as u64;
-
-            match result {
-                Ok(_) => {
-                    info!("✅ {} - 通过 ({}ms)", test_name, duration);
-                    self.statistics.add_result(true, false, duration);
-                },
-                Err(e) => {
-                    error!("❌ {} - 失败: {} ({}ms)", test_name, e, duration);
-                    self.statistics.add_result(false, false, duration);
-                },
-            }
-        }
+        self.run_test("扫描和迁移集成测试", || integration_tests::test_scan_and_migrate()).await;
+        self.run_test("错误处理和恢复集成测试", || integration_tests::test_error_handling_and_recovery()).await;
+        self.run_test("操作日志集成测试", || integration_tests::test_operation_logging()).await;
+        self.run_test("路径验证集成测试", || integration_tests::test_path_validation()).await;
+        self.run_test("备份和回滚集成测试", || integration_tests::test_backup_and_rollback()).await;
     }
 
     /// 运行端到端测试
-    async fn run_e2e_tests(&mut self) {
-        let tests = vec![
-            ("完整迁移流程测试", e2e_tests::test_complete_migration_workflow),
-            ("大文件夹处理测试", e2e_tests::test_large_folder_handling),
-            ("错误恢复流程测试", e2e_tests::test_error_recovery_workflow),
-            ("用户界面交互测试", e2e_tests::test_ui_interactions),
-            ("并发操作测试", e2e_tests::test_concurrent_operations),
-        ];
-
-        for (test_name, test_func) in tests {
-            let start_time = Instant::now();
-            let result = test_func().await;
-            let duration = start_time.elapsed().as_millis() as u64;
-
-            match result {
-                Ok(_) => {
-                    info!("✅ {} - 通过 ({}ms)", test_name, duration);
-                    self.statistics.add_result(true, false, duration);
-                },
-                Err(e) => {
-                    error!("❌ {} - 失败: {} ({}ms)", test_name, e, duration);
-                    self.statistics.add_result(false, false, duration);
-                },
-            }
-        }
+    pub async fn run_e2e_tests(&mut self) {
+        self.run_test("完整迁移流程测试", || e2e_tests::test_complete_migration_workflow()).await;
+        self.run_test("大文件夹处理测试", || e2e_tests::test_large_folder_handling()).await;
+        self.run_test("错误恢复流程测试", || e2e_tests::test_error_recovery_workflow()).await;
+        self.run_test("用户界面交互测试", || e2e_tests::test_ui_interactions()).await;
+        self.run_test("并发操作测试", || e2e_tests::test_concurrent_operations()).await;
     }
 
     /// 运行性能测试
-    async fn run_performance_tests(&mut self) {
-        let tests = vec![
-            ("磁盘扫描性能测试", performance_tests::test_disk_scan_performance),
-            ("文件迁移性能测试", performance_tests::test_migration_performance),
-            ("内存使用测试", performance_tests::test_memory_usage),
-            ("大文件处理性能测试", performance_tests::test_large_file_performance),
-            ("并发性能测试", performance_tests::test_concurrent_performance),
-        ];
-
-        for (test_name, test_func) in tests {
-            let start_time = Instant::now();
-            let result = test_func().await;
-            let duration = start_time.elapsed().as_millis() as u64;
-
-            match result {
-                Ok(_) => {
-                    info!("✅ {} - 通过 ({}ms)", test_name, duration);
-                    self.statistics.add_result(true, false, duration);
-                },
-                Err(e) => {
-                    error!("❌ {} - 失败: {} ({}ms)", test_name, e, duration);
-                    self.statistics.add_result(false, false, duration);
-                },
-            }
-        }
+    pub async fn run_performance_tests(&mut self) {
+        self.run_test("磁盘扫描性能测试", || performance_tests::test_disk_scan_performance()).await;
+        self.run_test("文件迁移性能测试", || performance_tests::test_migration_performance()).await;
+        self.run_test("内存使用测试", || performance_tests::test_memory_usage()).await;
+        self.run_test("大文件处理性能测试", || performance_tests::test_large_file_performance()).await;
+        self.run_test("并发性能测试", || performance_tests::test_concurrent_performance()).await;
     }
 
     /// 获取测试结果
@@ -334,7 +280,7 @@ impl TestReportGenerator {
 }
 
 /// 测试详情
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TestDetail {
     pub name: String,
     pub status: TestStatus,
@@ -343,7 +289,7 @@ pub struct TestDetail {
 }
 
 /// 测试状态
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TestStatus {
     Passed,
     Failed,
@@ -373,3 +319,9 @@ impl std::fmt::Display for TestError {
 }
 
 impl std::error::Error for TestError {}
+
+impl From<std::io::Error> for TestError {
+    fn from(error: std::io::Error) -> Self {
+        TestError::SetupFailed(format!("IO错误: {}", error))
+    }
+}

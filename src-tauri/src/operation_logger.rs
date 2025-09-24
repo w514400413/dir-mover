@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 /// 操作类型枚举
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperationType {
     Scan,
     Migrate,
@@ -18,7 +18,7 @@ pub enum OperationType {
 }
 
 /// 操作状态枚举
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum OperationStatus {
     Started,
     InProgress,
@@ -111,6 +111,7 @@ impl OperationLog {
 }
 
 /// 操作日志管理器
+#[derive(Clone)]
 pub struct OperationLogger {
     log_file: PathBuf,
     session_id: String,
