@@ -334,3 +334,63 @@ export interface AppDataDriveInfo {
   /** 是否是系统盘 - 系统盘标识（通常是C:） */
   isSystemDrive: boolean;
 }
+
+/**
+ * AppData 扫描事件类型
+ * 用于流式扫描过程中的实时事件推送
+ * 满足需求2、3：渐进式扫描机制和动态进度更新
+ */
+export type AppDataScanEvent =
+  | { type: 'directory_started'; data: { name: string; path: string; timestamp: number } }
+  | { type: 'item_found'; data: { item: AppDataFirstLevelItem; scanProgress: number } }
+  | { type: 'item_updated'; data: { path: string; newSize: number; updateReason: string } }
+  | { type: 'directory_completed'; data: { name: string; itemCount: number; totalSize: number; scanTimeMs: number } }
+  | { type: 'scan_progress'; data: { percentage: number; currentPath: string; itemsFound: number; estimatedTimeRemaining?: number } }
+  | { type: 'scan_completed'; data: { totalItems: number; totalSize: number; scanTimeMs: number; cacheStatistics: CacheStatistics } }
+  | { type: 'scan_error'; data: { error: string; path: string; errorType: string; recoverable: boolean } };
+
+/**
+ * AppData 实时扫描数据接口
+ * 用于存储和管理实时扫描过程中的数据状态
+ * 满足需求3、4：动态进度更新和动态排序功能
+ */
+export interface RealTimeScanData {
+  /** 当前项目列表 - 实时更新的扫描结果 */
+  items: AppDataFirstLevelItem[];
+  /** 总大小 - 实时计算的总大小 */
+  totalSize: number;
+  /** 扫描进度 - 当前扫描进度 (0-100) */
+  scanProgress: number;
+  /** 最后更新时间戳 - 用于判断数据新鲜度 */
+  lastUpdateTime: number;
+  /** 是否正在扫描 - 扫描状态标识 */
+  isScanning: boolean;
+  /** 当前排序字段 - 支持实时排序切换 */
+  sortField: 'name' | 'size';
+  /** 当前排序方式 - 升序或降序 */
+  sortOrder: 'asc' | 'desc';
+  /** 错误计数 - 扫描过程中遇到的错误数量 */
+  errorCount: number;
+  /** 缓存命中率 - 性能优化指标 */
+  cacheHitRate: number;
+}
+
+/**
+ * AppData 缓存统计信息接口
+ * 用于监控扫描过程中的缓存性能
+ * 满足需求5：性能优化要求
+ */
+export interface CacheStatistics {
+  /** 缓存命中次数 - 成功从缓存获取数据的次数 */
+  hitCount: number;
+  /** 缓存未命中次数 - 需要重新计算的次数 */
+  missCount: number;
+  /** 缓存淘汰次数 - 因空间限制被清理的次数 */
+  evictionCount: number;
+  /** 内存使用量 (MB) - 当前缓存占用的内存 */
+  memoryUsage: number;
+  /** 清理次数 - 缓存清理操作的总次数 */
+  cleanupCount: number;
+  /** 最后清理时间 - 上次缓存清理的时间戳 */
+  lastCleanupTime: number;
+}

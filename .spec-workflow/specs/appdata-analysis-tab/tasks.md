@@ -2,7 +2,7 @@
 
 ## 阶段1：核心数据结构和类型定义
 
-- [ ] 1. 扩展AppData扫描类型定义
+- [x] 1. 扩展AppData扫描类型定义
   - File: src/types/appdata.ts
   - 添加实时扫描相关的接口定义
   - 扩展现有的AppDataFirstLevelItem接口
@@ -11,7 +11,7 @@
   - _Requirements: 需求文档中的Requirement 2、3、4_
   - _Prompt: Role: TypeScript Developer specializing in real-time data interfaces | Task: Extend existing AppData type definitions to support real-time scanning updates following requirements 2, 3, 4 from the requirements document | Restrictions: Must maintain backward compatibility with existing AppDataScanner component, follow project naming conventions, ensure type safety for streaming data | Success: All new interfaces compile without errors, integrate seamlessly with existing types, support real-time size updates and dynamic sorting_
 
-- [ ] 2. 创建实时数据管理类型
+- [x] 2. 创建实时数据管理类型
   - File: src/types/realtime.ts
   - 定义扫描事件、进度更新、缓存统计等类型
   - Purpose: 为实时数据流提供完整的类型定义
@@ -21,7 +21,7 @@
 
 ## 阶段2：实时数据管理层
 
-- [ ] 3. 创建实时数据管理器
+- [x] 3. 创建实时数据管理器
   - File: src/services/RealTimeDataManager.ts
   - 实现扫描事件监听、数据更新、缓存管理
   - Purpose: 管理实时数据流和状态同步
@@ -29,7 +29,7 @@
   - _Requirements: 需求文档中的Requirement 2、3、4_
   - _Prompt: Role: Frontend Developer specializing in real-time data synchronization | Task: Create RealTimeDataManager to handle scan events, data updates, and cache management following requirements 2, 3, 4 | Restrictions: Must integrate with existing appDataAPI service, support Tauri event streaming, maintain data consistency, limit memory usage to 150MB | Success: Real-time data flow is properly managed, events are handled efficiently, cache strategy prevents memory overflow_
 
-- [ ] 4. 实现动态排序引擎
+- [x] 4. 实现动态排序引擎
   - File: src/utils/DynamicSortingEngine.ts
   - 实现增量排序算法，支持实时更新
   - Purpose: 提供高效的动态排序功能
@@ -39,7 +39,7 @@
 
 ## 阶段3：UI组件增强
 
-- [ ] 5. 增强AppDataScanner组件
+- [x] 5. 增强AppDataScanner组件
   - File: src/components/AppDataScanner.vue (modify existing)
   - 添加实时进度显示、动态排序、渐进式加载
   - Purpose: 实现完整的实时扫描用户体验
@@ -47,7 +47,7 @@
   - _Requirements: 需求文档中的Requirement 1、2、3、4、5_
   - _Prompt: Role: Vue.js Developer with expertise in reactive UI and real-time updates | Task: Enhance existing AppDataScanner component with real-time progress display, dynamic sorting, and progressive loading following all requirements | Restrictions: Must maintain existing functionality, support initial directory display within 3 seconds, update UI within 100ms of data changes, limit CPU usage to 25% | Success: Component provides seamless real-time experience, maintains responsiveness during scanning, supports all sorting and filtering requirements_
 
-- [ ] 6. 创建扫描进度组件
+- [x] 6. 创建扫描进度组件
   - File: src/components/ScanProgress.vue
   - 实现详细的进度显示、剩余时间估算、状态指示
   - Purpose: 提供直观的扫描进度反馈

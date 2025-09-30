@@ -344,12 +344,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, nextTick, onUnmounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { Folder } from '@element-plus/icons-vue';
-import type { AppDataScanOptions, AppDataScanResult, AppDataFirstLevelItem, AppDataMigrationOptions } from '../types/appdata';
+import type { AppDataScanOptions, AppDataScanResult, AppDataFirstLevelItem, AppDataMigrationOptions, AppDataSortField } from '../types/appdata';
 import { appDataAPI } from '../services/api';
 import { formatFileSize, getSizeColor } from '../utils/formatters';
+import { createRealTimeDataManager } from '../services/RealTimeDataManager';
+import { createDynamicSortingEngine } from '../utils/DynamicSortingEngine';
+import type { RealTimeScanData, AppDataScanEvent } from '../types/appdata';
+import type { DynamicSortingEngine } from '../utils/DynamicSortingEngine';
+
+// 实时数据管理器
+const realTimeDataManager = ref<ReturnType<typeof createRealTimeDataManager> | null>(null);
+const sortingEngine = ref<DynamicSortingEngine | null>(null);
 
 // 状态变量
 const scanning = ref(false);
@@ -366,6 +374,12 @@ const selectedItems = ref<AppDataFirstLevelItem[]>([]);
 const targetDrive = ref('');
 const availableDrives = ref<string[]>([]);
 
+// 实时数据状态
+const realTimeData = ref<RealTimeScanData | null>(null);
+const isRealTimeMode = ref(true); // 默认启用实时模式
+const scanEvents = ref<AppDataScanEvent[]>([]);
+const maxEventsToShow = ref(10); // 最多显示的事件数量
+
 // 迁移对话框
 const migrationDialog = ref({
   visible: false,
@@ -378,32 +392,26 @@ const canMigrate = computed(() => {
   return scanResult.value?.success && scanResult.value.data && availableDrives.value.length > 0;
 });
 
-// 计算属性：按目录分组的一级项目
-const groupedItems = computed(() => {
-  if (!scanResult.value?.data?.firstLevelItems) return {};
+// 计算属性：实时数据可用性
+const hasRealTimeData = computed(() => {
+  return realTimeData.value && realTimeData.value.items.length > 0;
+});
 
-  let items = [...scanResult.value.data.firstLevelItems];
-
-  // 应用大小过滤
-  if (showOnlyLarge.value) {
-    items = items.filter(item => item.isLarge);
+// 计算属性：当前显示的数据源
+const currentDataSource = computed(() => {
+  if (isRealTimeMode.value && realTimeData.value) {
+    return realTimeData.value;
   }
+  return scanResult.value?.data || null;
+});
 
-  // 应用排序
-  items.sort((a, b) => {
-    let compareValue = 0;
-    
-    switch (sortField.value) {
-      case 'size':
-        compareValue = a.size - b.size;
-        break;
-      case 'name':
-        compareValue = a.name.localeCompare(b.name);
-        break;
-    }
+// 排序后的项目（响应式）
+const sortedItems = ref<AppDataFirstLevelItem[]>([]);
 
-    return sortOrder.value === 'desc' ? -compareValue : compareValue;
-  });
+// 计算属性：按目录分组的一级项目（支持实时更新）
+const groupedItems = computed(() => {
+  const items = sortedItems.value;
+  if (items.length === 0) return {};
 
   // 按父目录类型分组
   const grouped: Record<string, AppDataFirstLevelItem[]> = {
@@ -419,6 +427,22 @@ const groupedItems = computed(() => {
   });
 
   return grouped;
+});
+
+// 计算属性：实时扫描进度
+const realTimeProgress = computed(() => {
+  if (!realTimeData.value) return 0;
+  return realTimeData.value.scanProgress;
+});
+
+// 计算属性：性能指标
+const performanceMetrics = computed(() => {
+  if (!realTimeDataManager.value) return null;
+  return {
+    cacheHitRate: realTimeData.value?.cacheHitRate || 0,
+    errorCount: realTimeData.value?.errorCount || 0,
+    isScanning: realTimeData.value?.isScanning || false
+  };
 });
 
 // 方法：开始扫描
@@ -664,23 +688,244 @@ function getPercentage(size: number, total: number): number {
 }
 
 // 监听排序字段变化，实时更新
-watch([sortField, sortOrder], () => {
-  if (scanning.value) {
-    // 扫描过程中动态排序
-    console.log(`排序更新: ${sortField.value} ${sortOrder.value}`);
-  }
+watch([sortField, sortOrder], async () => {
+  console.log(`排序更新: ${sortField.value} ${sortOrder.value}`);
+  await performDynamicSort();
 });
+
+// 监听实时数据变化，自动排序
+watch(realTimeData, async (newData) => {
+  if (newData && newData.items.length > 0) {
+    await performDynamicSort();
+  }
+}, { deep: true });
+
+// 监听扫描结果变化，初始化排序
+watch(scanResult, async (newResult) => {
+  if (newResult?.data?.firstLevelItems) {
+    await performDynamicSort();
+  }
+}, { deep: true });
+
+// 执行动态排序
+async function performDynamicSort(): Promise<void> {
+  let items: AppDataFirstLevelItem[] = [];
+  
+  if (isRealTimeMode.value && realTimeData.value) {
+    items = [...realTimeData.value.items];
+  } else if (scanResult.value?.data?.firstLevelItems) {
+    items = [...scanResult.value.data.firstLevelItems];
+  }
+
+  if (items.length === 0) {
+    sortedItems.value = [];
+    return;
+  }
+
+  // 应用大小过滤
+  if (showOnlyLarge.value) {
+    items = items.filter(item => item.isLarge);
+  }
+
+  // 使用动态排序引擎进行高性能排序
+  if (sortingEngine.value && items.length > 0) {
+    try {
+      const startTime = performance.now();
+      const sortResult = await sortingEngine.value.sort(items, sortField.value as AppDataSortField, sortOrder.value, {
+        useIncremental: items.length < 100 // 小数据集使用增量排序
+      });
+      sortedItems.value = sortResult.items;
+      
+      const sortTime = performance.now() - startTime;
+      console.log(`动态排序完成: ${sortTime.toFixed(2)}ms, 项目数: ${items.length}`);
+      
+      // 确保在100ms内完成UI更新
+      if (sortTime > 100) {
+        console.warn(`排序时间超过100ms: ${sortTime.toFixed(2)}ms`);
+      }
+    } catch (error) {
+      console.error('动态排序失败，使用默认排序:', error);
+      // 回退到默认排序
+      performDefaultSort(items);
+    }
+  } else {
+    // 默认排序逻辑
+    performDefaultSort(items);
+  }
+}
+
+// 执行默认排序
+function performDefaultSort(items: AppDataFirstLevelItem[]): void {
+  const sorted = [...items];
+  sorted.sort((a, b) => {
+    let compareValue = 0;
+    switch (sortField.value) {
+      case 'size':
+        compareValue = a.size - b.size;
+        break;
+      case 'name':
+        compareValue = a.name.localeCompare(b.name);
+        break;
+    }
+    return sortOrder.value === 'desc' ? -compareValue : compareValue;
+  });
+  sortedItems.value = sorted;
+}
+
+// 初始化实时数据管理器
+async function initializeRealTimeManager(): Promise<void> {
+  try {
+    // 创建实时数据管理器
+    realTimeDataManager.value = createRealTimeDataManager({
+      config: {
+        maxMemoryUsage: 100, // 限制内存使用
+        updateFrequency: 100, // 100ms更新频率
+        cacheExpiration: 300, // 5分钟缓存过期
+        batchSize: 50,
+        enableCaching: true,
+        enableMemoryMonitoring: true,
+        cleanupInterval: 60
+      },
+      performanceCallback: (metrics) => {
+        // 性能监控回调
+        if (metrics.sortTime > 500) {
+          console.warn(`排序时间超过500ms: ${metrics.sortTime}ms`);
+        }
+      },
+      errorCallback: (error, context) => {
+        console.error(`实时数据管理器错误 [${context}]:`, error);
+        ElMessage.error(`数据处理错误: ${error.message}`);
+      }
+    });
+
+    // 初始化实时数据管理器
+    await realTimeDataManager.value.initialize();
+
+    // 设置事件监听
+    setupRealTimeEventListeners();
+
+    console.log('实时数据管理器初始化完成');
+  } catch (error) {
+    console.error('实时数据管理器初始化失败:', error);
+    ElMessage.error('实时数据功能初始化失败，将使用传统模式');
+    isRealTimeMode.value = false;
+  }
+}
+
+// 设置实时事件监听器
+function setupRealTimeEventListeners(): void {
+  if (!realTimeDataManager.value) return;
+
+  // 监听扫描开始事件
+  realTimeDataManager.value.on('scan_started', (data) => {
+    console.log('扫描开始:', data);
+    scanEvents.value = [];
+  });
+
+  // 监听数据更新事件
+  realTimeDataManager.value.on('data_updated', (data: any) => {
+    console.log('数据更新:', data);
+    
+    // 限制事件数量
+    scanEvents.value.unshift({
+      type: 'scan_progress',
+      data: {
+        percentage: realTimeData.value?.scanProgress || 0,
+        currentPath: `更新了 ${data?.itemCount || 0} 个项目`,
+        itemsFound: data?.itemCount || 0
+      }
+    });
+    
+    // 保持事件数量在限制范围内
+    if (scanEvents.value.length > maxEventsToShow.value) {
+      scanEvents.value = scanEvents.value.slice(0, maxEventsToShow.value);
+    }
+  });
+
+  // 监听排序完成事件
+  realTimeDataManager.value.on('sort_completed', (data: any) => {
+    console.log('排序完成:', data);
+    ElMessage.success(`排序完成，耗时 ${data?.sortTime?.toFixed(2) || 0}ms`);
+  });
+
+  // 监听扫描完成事件
+  realTimeDataManager.value.on('scan_completed', (data: any) => {
+    console.log('扫描完成:', data);
+    scanning.value = false;
+    progress.value = 100;
+    progressStatus.value = 'success';
+    
+    ElMessage.success(`扫描完成！共发现 ${data?.totalItems || 0} 个项目`);
+    
+    // 加载可用盘符
+    loadAvailableDrives();
+  });
+
+  // 监听扫描停止事件
+  realTimeDataManager.value.on('scan_stopped', (data) => {
+    console.log('扫描停止:', data);
+    scanning.value = false;
+    ElMessage.info('扫描已停止');
+  });
+
+  // 监听内存清理事件
+  realTimeDataManager.value.on('memory_cleanup_completed', (data) => {
+    console.log('内存清理完成:', data);
+    ElMessage.info('内存优化完成');
+  });
+}
+
+// 初始化动态排序引擎
+function initializeSortingEngine(): void {
+  try {
+    sortingEngine.value = createDynamicSortingEngine({
+      defaultAlgorithm: 'timSort' as any, // 适用于部分有序数据
+      smallDatasetThreshold: 100,
+      largeDatasetThreshold: 5000,
+      incrementalUpdateThreshold: 50,
+      maxSortTime: 500, // 500ms限制
+      enableCache: true,
+      cacheSizeLimit: 100,
+      enablePreSorting: true,
+      preSortSampleSize: 100
+    });
+
+    console.log('动态排序引擎初始化完成');
+  } catch (error) {
+    console.error('动态排序引擎初始化失败:', error);
+    ElMessage.error('动态排序功能初始化失败');
+  }
+}
 
 // 生命周期
 onMounted(async () => {
   console.log('AppData扫描器已加载');
-  // UX-1: 根据用户偏好决定是否自动开始扫描
-  const autoScanEnabled = localStorage.getItem('autoScanEnabled') !== 'false';
-  if (autoScanEnabled) {
-    await startScan();
-  } else {
-    // 显示友好的初始状态
-    ElMessage.info('点击"开始扫描"按钮来分析您的AppData目录');
+  
+  try {
+    // 初始化实时数据管理器
+    await initializeRealTimeManager();
+    
+    // 初始化动态排序引擎
+    initializeSortingEngine();
+    
+    // UX-1: 根据用户偏好决定是否自动开始扫描
+    const autoScanEnabled = localStorage.getItem('autoScanEnabled') !== 'false';
+    if (autoScanEnabled) {
+      await startScan();
+    } else {
+      // 显示友好的初始状态
+      ElMessage.info('点击"开始扫描"按钮来分析您的AppData目录');
+    }
+  } catch (error) {
+    console.error('组件初始化失败:', error);
+    ElMessage.error('组件初始化失败，请刷新页面重试');
+  }
+});
+
+// 组件卸载时清理资源
+onUnmounted(async () => {
+  if (realTimeDataManager.value) {
+    await realTimeDataManager.value.destroy();
   }
 });
 </script>
