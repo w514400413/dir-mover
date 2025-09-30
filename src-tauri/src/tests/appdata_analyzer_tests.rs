@@ -6,6 +6,11 @@ use std::fs;
 use std::path::Path;
 use std::fs::File;
 use std::io::Write;
+use log::{info, warn};
+use crate::appdata_analyzer::{
+    AppDataAnalyzer, AppDataConfig, AppDataFirstLevelItem,
+    AppDataMigrationOptions, SortOrder
+};
 
 /// 测试AppData路径检测
 #[test]
@@ -80,8 +85,9 @@ fn test_large_folder_filtering() {
     info!("测试大文件夹筛选逻辑");
     
     // 创建测试数据
-    let temp_dir = TempDir::new().expect("创建临时目录失败");
-    let test_base = temp_dir.path().join("test_appdata");
+    let temp_dir = std::env::temp_dir().join("test_appdata");
+    fs::create_dir_all(&temp_dir).expect("创建临时目录失败");
+    let test_base = temp_dir.join("test_appdata");
     
     // 创建模拟的AppData结构
     let local_dir = test_base.join("Local");
@@ -119,6 +125,9 @@ fn test_large_folder_filtering() {
     assert!(small_file.exists(), "小文件应该存在");
     
     info!("大文件夹筛选逻辑测试通过");
+    
+    // 清理临时目录
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 /// 测试文件大小格式化
@@ -141,8 +150,9 @@ fn test_performance_requirements() {
     info!("测试性能要求");
     
     // 创建测试数据
-    let temp_dir = TempDir::new().expect("创建临时目录失败");
-    let test_base = temp_dir.path().join("performance_test");
+    let temp_dir = std::env::temp_dir().join("performance_test");
+    fs::create_dir_all(&temp_dir).expect("创建临时目录失败");
+    let test_base = temp_dir.join("performance_test");
     
     // 创建包含多个子目录的测试结构
     for i in 0..10 {
@@ -159,17 +169,20 @@ fn test_performance_requirements() {
     let analyzer = AppDataAnalyzer::new();
     
     // 测量扫描性能
-    let measurer = PerformanceMeasurer::new("AppData扫描性能测试");
+    let start_time = std::time::Instant::now();
     
     // 注意：这里我们测试的是格式化逻辑，实际的文件系统扫描需要更复杂的设置
     let formatted_size = AppDataAnalyzer::format_size(1024 * 1024 * 1024);
     
-    let metrics = measurer.finish();
+    let duration = start_time.elapsed();
     
     // 验证性能要求（格式化操作应该很快）
-    assert!(metrics.duration.as_millis() < 100, "格式化操作应该在100ms内完成");
+    assert!(duration.as_millis() < 100, "格式化操作应该在100ms内完成");
     
-    info!("性能要求测试通过 - 耗时: {:?}", metrics.duration);
+    info!("性能要求测试通过 - 耗时: {:?}", duration);
+    
+    // 清理临时目录
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 /// 测试错误处理
@@ -345,8 +358,9 @@ mod appdata_integration_tests {
         info!("测试完整的AppData扫描流程");
         
         // 创建测试环境
-        let temp_dir = TempDir::new().expect("创建临时目录失败");
-        let test_base = temp_dir.path().join("appdata_integration_test");
+        let temp_dir = std::env::temp_dir().join("appdata_integration_test");
+        fs::create_dir_all(&temp_dir).expect("创建临时目录失败");
+        let test_base = temp_dir.join("appdata_integration_test");
         
         // 创建模拟的AppData结构
         let local_dir = test_base.join("Local");
@@ -395,6 +409,9 @@ mod appdata_integration_tests {
         }
         
         info!("完整的AppData扫描流程测试通过");
+        
+        // 清理临时目录
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 }
 
@@ -403,8 +420,9 @@ mod appdata_integration_tests {
 fn test_first_level_item_detection() {
     info!("测试一级项目检测功能");
     
-    let temp_dir = TempDir::new().expect("创建临时目录失败");
-    let test_base = temp_dir.path().join("first_level_test");
+    let temp_dir = std::env::temp_dir().join("first_level_test");
+    fs::create_dir_all(&temp_dir).expect("创建临时目录失败");
+    let test_base = temp_dir.join("first_level_test");
     
     // 创建模拟的AppData结构
     let local_dir = test_base.join("Local");
@@ -446,6 +464,9 @@ fn test_first_level_item_detection() {
     assert!(subfile.exists(), "子文件应该存在");
     
     info!("一级项目检测功能测试通过");
+    
+    // 清理临时目录
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 /// 测试动态排序功能
@@ -672,13 +693,16 @@ fn test_performance_requirements_nfr2() {
     // 模拟大量项目处理
     let mut items = Vec::new();
     for i in 0..1000 {
+        let size = (i as u64 + 1) * 10 * 1024 * 1024; // 10MB递增
+        let is_large = size >= 1024 * 1024 * 1024; // 大于等于1GB的项目标记为大项目
+        
         items.push(AppDataFirstLevelItem {
             path: format!("path_{}", i),
             name: format!("App{}", i),
-            size: (i as u64 + 1) * 10 * 1024 * 1024, // 10MB递增
+            size,
             item_type: if i % 2 == 0 { "directory".to_string() } else { "file".to_string() },
             parent_type: if i % 3 == 0 { "Local".to_string() } else if i % 3 == 1 { "Roaming".to_string() } else { "LocalLow".to_string() },
-            is_large: i > 100, // 大约100个项目会大于1GB
+            is_large,
             size_percentage: (i as f64 / 1000.0) * 100.0,
         });
     }
@@ -702,9 +726,16 @@ fn test_performance_requirements_nfr2() {
     assert!(filter_duration.as_millis() < 50, "筛选操作应该在50ms内完成");
     assert!(total_duration.as_millis() < 500, "总体操作应该在500ms内完成");
     
-    // 验证结果正确性
-    assert_eq!(large_items.len(), 900, "应该有900个大项目");
+    // 验证结果正确性 - 计算有多少个项目大于等于1GB
+    // 项目大小 = (i+1) * 10MB, 1GB = 1024MB
+    // 所以需要 (i+1) * 10 >= 1024 => i+1 >= 102.4 => i >= 101.4 => i >= 102
+    // 所以从 i=102 到 i=999，共 999-102+1 = 898 个项目
+    assert_eq!(large_items.len(), 898, "应该有898个大项目");
     assert_eq!(items[0].name, "App999", "最大的项目应该是App999");
+    
+    // 验证is_large标志的正确性
+    let expected_large_count = items.iter().filter(|item| item.is_large).count();
+    assert_eq!(expected_large_count, 898, "应该有898个项目标记为is_large");
     
     info!("性能要求（NFR-2）测试通过 - 总耗时: {:?}", total_duration);
 }
