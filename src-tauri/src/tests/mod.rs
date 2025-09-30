@@ -10,6 +10,8 @@ pub mod integration_tests;
 pub mod e2e_tests;
 pub mod test_utils;
 pub mod performance_tests;
+pub mod appdata_analyzer_tests;
+pub mod appdata_performance_tests;
 
 use log::{info, error};
 use std::time::Instant;
@@ -101,6 +103,7 @@ impl TestRunner {
         self.run_test("迁移服务单元测试", || unit_tests::test_migration_service()).await;
         self.run_test("错误恢复单元测试", || unit_tests::test_error_recovery()).await;
         self.run_test("操作日志单元测试", || unit_tests::test_operation_logger()).await;
+        info!("AppData分析器单元测试已在独立测试文件中运行");
     }
 
     /// 运行单个测试
@@ -132,6 +135,7 @@ impl TestRunner {
         self.run_test("操作日志集成测试", || integration_tests::test_operation_logging()).await;
         self.run_test("路径验证集成测试", || integration_tests::test_path_validation()).await;
         self.run_test("备份和回滚集成测试", || integration_tests::test_backup_and_rollback()).await;
+        self.run_test("AppData扫描集成测试", || integration_tests::test_appdata_scan_integration()).await;
     }
 
     /// 运行端到端测试
@@ -150,6 +154,19 @@ impl TestRunner {
         self.run_test("内存使用测试", || performance_tests::test_memory_usage()).await;
         self.run_test("大文件处理性能测试", || performance_tests::test_large_file_performance()).await;
         self.run_test("并发性能测试", || performance_tests::test_concurrent_performance()).await;
+        // AppData性能测试函数是同步的，需要适配异步接口
+        self.run_test("AppData扫描性能测试", || async {
+            appdata_performance_tests::test_appdata_scan_performance()
+                .map_err(|e| crate::tests::TestError::ExecutionFailed(e.to_string()))
+        }).await;
+        self.run_test("AppData内存使用测试", || async {
+            appdata_performance_tests::test_appdata_memory_usage()
+                .map_err(|e| crate::tests::TestError::ExecutionFailed(e.to_string()))
+        }).await;
+        self.run_test("AppData并发性能测试", || async {
+            appdata_performance_tests::test_appdata_concurrent_performance()
+                .map_err(|e| crate::tests::TestError::ExecutionFailed(e.to_string()))
+        }).await;
     }
 
     /// 获取测试结果

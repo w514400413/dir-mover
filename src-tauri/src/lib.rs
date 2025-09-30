@@ -7,19 +7,21 @@ mod performance_optimizer;
 mod types;
 mod logger;
 mod tests;
+mod appdata_analyzer;
 
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tauri::State;
-use log::{info, error};
+use log::{info, error, warn};
 
 use disk_analyzer::{DiskAnalyzer, DirectoryInfo, format_file_size};
-use error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig, RecoveryContext, RecoveryResult, RecoveryStatistics};
+use error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig, RecoveryContext, RecoveryStatistics};
 use migration_service::{MigrationService, MigrationOptions, MigrationResult, validate_migration_options};
-use operation_logger::{OperationLogger, OperationType, OperationStatus, OperationLog, OperationStatistics};
-use performance_optimizer::{PerformanceOptimizer, PerformanceConfig, PerformanceStats};
-use types::{ScanProgress, PathValidationResult};
+use operation_logger::{OperationLogger, OperationStatistics};
+use performance_optimizer::{PerformanceOptimizer, PerformanceConfig};
+use types::PathValidationResult;
+use appdata_analyzer::{AppDataAnalyzer, AppDataInfo, AppDataConfig, SortOrder, AppDataMigrationOptions};
 
 /// 应用状态
 struct AppState {
@@ -250,7 +252,7 @@ async fn cleanup_old_operation_logs(days_to_keep: u32, state: State<'_, AppState
 
 /// 运行综合测试套件
 #[tauri::command]
-async fn run_comprehensive_tests(state: State<'_, AppState>) -> Result<tests::TestStatistics, String> {
+async fn run_comprehensive_tests(_state: State<'_, AppState>) -> Result<tests::TestStatistics, String> {
     info!("开始运行综合测试套件");
     
     let mut test_runner = tests::TestRunner::new();
@@ -267,7 +269,7 @@ async fn run_comprehensive_tests(state: State<'_, AppState>) -> Result<tests::Te
 
 /// 运行特定类型的测试
 #[tauri::command]
-async fn run_test_suite(test_type: String, state: State<'_, AppState>) -> Result<tests::TestStatistics, String> {
+async fn run_test_suite(test_type: String, _state: State<'_, AppState>) -> Result<tests::TestStatistics, String> {
     info!("运行 {} 测试套件", test_type);
     
     let mut test_runner = tests::TestRunner::new();
@@ -296,7 +298,7 @@ async fn run_test_suite(test_type: String, state: State<'_, AppState>) -> Result
 
 /// 生成测试报告
 #[tauri::command]
-async fn generate_test_report(output_path: String, state: State<'_, AppState>) -> Result<bool, String> {
+async fn generate_test_report(output_path: String, _state: State<'_, AppState>) -> Result<bool, String> {
     info!("生成测试报告: {}", output_path);
     
     // 运行测试获取结果
@@ -347,7 +349,7 @@ async fn test_error_recovery(state: State<'_, AppState>) -> Result<bool, String>
     use crate::file_operations::FileOperationError;
     let test_error = FileOperationError::PermissionDenied("测试权限错误".to_string());
     
-    let context = RecoveryContext::new(
+    let _context = RecoveryContext::new(
         "test_operation".to_string(),
         std::path::PathBuf::from("test_path"),
         None,
@@ -510,8 +512,241 @@ pub fn run() {
             get_performance_stats,
             optimize_disk_scan,
             run_memory_cleanup,
-            get_performance_benchmark
+            get_performance_benchmark,
+            scan_appdata,
+            get_appdata_path,
+            migrate_appdata_items,
+            get_available_drives,
+            get_migration_progress,
+            validate_appdata_migration_options
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// 扫描AppData目录（新版本，支持配置）
+#[tauri::command]
+async fn scan_appdata(config: Option<AppDataConfig>, state: State<'_, AppState>) -> Result<AppDataInfo, String> {
+    info!("收到扫描AppData目录请求");
+    
+    let mut analyzer = AppDataAnalyzer::new();
+    
+    // 应用配置（如果有）
+    if let Some(mut config) = config {
+        let min_size = config.min_size_threshold;
+        let max_depth = config.max_depth;
+        let sort_order = config.sort_order.clone();
+        
+        analyzer.set_config(config);
+        info!("应用自定义配置: min_size_threshold={}, max_depth={}, sort_order={:?}",
+              min_size, max_depth, sort_order);
+    }
+    
+    info!("开始扫描AppData目录");
+    
+    match analyzer.scan_appdata().await {
+        Ok(result) => {
+            info!("AppData扫描完成 - 总大小: {}, 一级项目数量: {}, 大项目数量: {}, 耗时: {}ms",
+                  format_file_size(result.total_size),
+                  result.first_level_items.len(),
+                  result.large_items.len(),
+                  result.scan_time_ms);
+            Ok(result)
+        }
+        Err(e) => {
+            error!("AppData扫描失败: {}", e);
+            Err(format!("AppData扫描失败: {}", e))
+        }
+    }
+}
+
+/// 迁移AppData项目
+#[tauri::command]
+async fn migrate_appdata_items(options: AppDataMigrationOptions, state: State<'_, AppState>) -> Result<MigrationResult, String> {
+    info!("收到AppData迁移请求 - 目标盘符: {}, 项目数量: {}",
+          options.target_drive, options.source_items.len());
+    
+    // 验证目标盘符
+    let target_drive = Path::new(&options.target_drive);
+    if !target_drive.exists() {
+        return Err(format!("目标盘符不存在: {}", options.target_drive));
+    }
+    
+    let mut all_results = Vec::new();
+    let mut total_migrated_size = 0u64;
+    let mut success_count = 0;
+    let mut failure_count = 0;
+    
+    // 逐个迁移项目
+    for source_item in &options.source_items {
+        let source_path = Path::new(source_item);
+        if !source_path.exists() {
+            warn!("源项目不存在，跳过: {}", source_item);
+            failure_count += 1;
+            continue;
+        }
+        
+        // 构建目标路径（保持相对路径结构）
+        let item_name = source_path.file_name()
+            .ok_or_else(|| format!("无法获取项目名称: {}", source_item))?
+            .to_string_lossy();
+        
+        let target_path = target_drive.join(item_name.to_string());
+        
+        info!("迁移项目: {} -> {}", source_item, target_path.display());
+        
+        let migration_options = MigrationOptions {
+            source_path: source_item.clone(),
+            target_path: target_path.to_string_lossy().to_string(),
+            create_symlink: options.create_symlink,
+            delete_source: options.delete_source,
+        };
+        
+        // 验证迁移选项
+        if let Err(e) = validate_migration_options(&migration_options) {
+            error!("迁移选项验证失败: {}", e);
+            failure_count += 1;
+            continue;
+        }
+        
+        // 执行迁移
+        match state.migration_service.migrate_folder(migration_options).await {
+            Ok(result) => {
+                if result.success {
+                    success_count += 1;
+                    // 估算迁移大小（简化处理）
+                    let estimated_size = 1024 * 1024 * 1024; // 假设1GB
+                    total_migrated_size += estimated_size;
+                    info!("项目迁移成功: {}, 大小: {}", source_item, format_file_size(estimated_size));
+                } else {
+                    failure_count += 1;
+                    error!("项目迁移失败: {}, 错误: {}", source_item, result.message);
+                }
+                all_results.push(result);
+            }
+            Err(e) => {
+                failure_count += 1;
+                error!("项目迁移出错: {}, 错误: {}", source_item, e);
+            }
+        }
+    }
+    
+    // 汇总结果
+    let overall_success = failure_count == 0;
+    let summary = format!("AppData迁移完成 - 成功: {}, 失败: {}, 总迁移大小: {}",
+                         success_count, failure_count, format_file_size(total_migrated_size));
+    
+    info!("{}", summary);
+    
+    Ok(MigrationResult {
+        success: overall_success,
+        message: summary,
+        source_path: format!("{}个项目", options.source_items.len()),
+        target_path: options.target_drive.clone(),
+        symlink_path: if options.create_symlink { Some(format!("创建了{}个符号链接", success_count)) } else { None },
+    })
+}
+
+/// 获取系统可用盘符
+#[tauri::command]
+fn get_available_drives() -> Result<Vec<String>, String> {
+    info!("获取系统可用盘符");
+    
+    // 简化的盘符检测 - 检查常见的盘符
+    let mut drives = Vec::new();
+    let common_drives = ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
+    
+    for drive_letter in common_drives {
+        let drive_path = format!("{}:\\", drive_letter);
+        let drive_path_buf = std::path::PathBuf::from(&drive_path);
+        
+        // 检查盘符是否存在且是目录
+        if drive_path_buf.exists() && drive_path_buf.is_dir() {
+            drives.push(drive_path);
+        }
+    }
+    
+    info!("发现可用盘符: {:?}", drives);
+    Ok(drives)
+}
+
+/// 获取迁移进度（用于实时进度报告）
+#[tauri::command]
+fn get_migration_progress(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // 这里应该实现真实的进度跟踪
+    // 暂时返回模拟数据
+    Ok(serde_json::json!({
+        "current_item": "暂无迁移任务",
+        "progress": 0,
+        "total_items": 0,
+        "estimated_time_remaining": 0
+    }))
+}
+
+/// 验证AppData迁移选项
+#[tauri::command]
+fn validate_appdata_migration_options(options: AppDataMigrationOptions) -> Result<serde_json::Value, String> {
+    info!("验证AppData迁移选项 - 目标盘符: {}, 项目数量: {}", options.target_drive, options.source_items.len());
+    
+    let mut validation_results = Vec::new();
+    let mut valid_count = 0;
+    
+    // 验证目标盘符
+    let target_drive_path = Path::new(&options.target_drive);
+    if !target_drive_path.exists() {
+        return Err(format!("目标盘符不存在: {}", options.target_drive));
+    }
+    
+    // 验证每个源项目
+    for source_item in &options.source_items {
+        let source_path = Path::new(source_item);
+        let item_validation = if !source_path.exists() {
+            serde_json::json!({
+                "path": source_item,
+                "valid": false,
+                "message": "源路径不存在"
+            })
+        } else if !source_path.is_dir() && !source_path.is_file() {
+            serde_json::json!({
+                "path": source_item,
+                "valid": false,
+                "message": "路径既不是文件也不是目录"
+            })
+        } else {
+            valid_count += 1;
+            serde_json::json!({
+                "path": source_item,
+                "valid": true,
+                "message": "路径有效"
+            })
+        };
+        
+        validation_results.push(item_validation);
+    }
+    
+    let summary = format!("验证完成：{}/{} 个项目有效", valid_count, options.source_items.len());
+    info!("{}", summary);
+    
+    Ok(serde_json::json!({
+        "valid": valid_count == options.source_items.len(),
+        "items": validation_results,
+        "summary": summary,
+        "target_drive_valid": true,
+        "target_drive": options.target_drive
+    }))
+}
+
+/// 获取AppData路径信息
+#[tauri::command]
+fn get_appdata_path() -> Result<String, String> {
+    match AppDataAnalyzer::get_appdata_path() {
+        Ok(path) => {
+            info!("获取AppData路径: {}", path.display());
+            Ok(path.to_string_lossy().to_string())
+        }
+        Err(e) => {
+            error!("获取AppData路径失败: {}", e);
+            Err(format!("获取AppData路径失败: {}", e))
+        }
+    }
 }

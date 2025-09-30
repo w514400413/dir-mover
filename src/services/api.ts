@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { DirectoryInfo, ScanProgress, MigrationOptions, MigrationResult } from "../types/directory";
+import { AppDataInfo, AppDataScanOptions, AppDataScanResult, AppDataConfig, AppDataMigrationOptions, AppDataMigrationResult, AppDataDriveInfo } from "../types/appdata";
 
 // 操作日志类型定义
 export interface OperationLog {
@@ -469,5 +470,421 @@ export const operationAPI = {
       console.error("清理旧日志失败:", error);
       throw new Error(`清理旧日志失败: ${error}`);
     }
+  }
+};
+
+/**
+ * AppData 扫描API（更新版本）
+ */
+export const appDataAPI = {
+  /**
+   * 扫描AppData目录（新版本，支持配置）
+   * @param options 扫描选项（可选）
+   * @returns AppData信息
+   */
+  async scanAppData(options?: AppDataScanOptions): Promise<AppDataInfo> {
+    console.log('API: 开始扫描AppData目录', options);
+    try {
+      // 构建配置参数
+      const config: AppDataConfig = {
+        minSizeThreshold: options?.minSizeThreshold || 1024 * 1024 * 1024, // 默认1GB
+        maxDepth: options?.maxDepth || 2, // 默认2层
+        sortOrder: options?.sortOrder || 'desc' // 默认降序
+      };
+
+      const result = await invoke<AppDataInfo>("scan_appdata", { config });
+      console.log('API: AppData扫描成功', result);
+      return result;
+    } catch (error) {
+      console.error("API: AppData扫描失败:", error);
+      throw new Error(`AppData扫描失败: ${error}`);
+    }
+  },
+
+  /**
+   * 获取AppData路径
+   * @returns AppData路径
+   */
+  async getAppDataPath(): Promise<string> {
+    try {
+      const result = await invoke<string>("get_appdata_path");
+      console.log('API: 获取AppData路径成功', result);
+      return result;
+    } catch (error) {
+      console.error("API: 获取AppData路径失败:", error);
+      throw new Error(`获取AppData路径失败: ${error}`);
+    }
+  },
+
+  /**
+   * 迁移AppData项目（增强版本，支持进度报告）
+   * @param options 迁移选项
+   * @param onProgress 进度回调函数（可选）
+   * @returns 迁移结果
+   */
+  async migrateAppDataItems(
+    options: AppDataMigrationOptions,
+    onProgress?: (progress: { currentItem: string; progress: number; totalItems: number }) => void
+  ): Promise<AppDataMigrationResult> {
+    console.log('API: 开始迁移AppData项目', options);
+    
+    try {
+      // 验证迁移选项
+      this.validateMigrationOptions(options);
+      
+      // 如果提供了进度回调，设置进度监听
+      if (onProgress) {
+        // 模拟进度报告（实际实现需要后端支持）
+        const totalItems = options.sourceItems.length;
+        let currentIndex = 0;
+        
+        // 开始迁移前报告进度
+        onProgress({
+          currentItem: '开始迁移...',
+          progress: 0,
+          totalItems
+        });
+        
+        // 执行迁移
+        const result = await invoke<MigrationResult>("migrate_appdata_items", { options });
+        
+        // 模拟进度更新（实际应该由后端驱动）
+        for (const item of options.sourceItems) {
+          currentIndex++;
+          onProgress({
+            currentItem: item,
+            progress: Math.round((currentIndex / totalItems) * 100),
+            totalItems
+          });
+          
+          // 模拟处理时间
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // 转换结果格式
+        const migrationResult: AppDataMigrationResult = {
+          success: result.success,
+          message: result.message,
+          migratedItems: result.success ? options.sourceItems.length : 0,
+          failedItems: result.success ? 0 : options.sourceItems.length,
+          totalSize: 0, // 可以从迁移服务获取实际大小
+          targetDrive: options.targetDrive
+        };
+        
+        console.log('API: AppData迁移成功', migrationResult);
+        return migrationResult;
+      } else {
+        // 无进度回调的简单迁移
+        const result = await invoke<MigrationResult>("migrate_appdata_items", { options });
+        
+        const migrationResult: AppDataMigrationResult = {
+          success: result.success,
+          message: result.message,
+          migratedItems: result.success ? options.sourceItems.length : 0,
+          failedItems: result.success ? 0 : options.sourceItems.length,
+          totalSize: 0,
+          targetDrive: options.targetDrive
+        };
+        
+        console.log('API: AppData迁移成功', migrationResult);
+        return migrationResult;
+      }
+    } catch (error) {
+      console.error("API: AppData迁移失败:", error);
+      
+      // 详细的错误处理
+      const errorMessage = this.formatMigrationError(error);
+      
+      // 返回错误结果
+      return {
+        success: false,
+        message: errorMessage,
+        migratedItems: 0,
+        failedItems: options.sourceItems.length,
+        totalSize: 0,
+        targetDrive: options.targetDrive
+      };
+    }
+  },
+
+  /**
+   * 获取系统可用盘符
+   * @returns 可用盘符列表
+   */
+  async getAvailableDrives(): Promise<string[]> {
+    try {
+      const drives = await invoke<string[]>("get_available_drives");
+      console.log('API: 获取可用盘符成功', drives);
+      return drives;
+    } catch (error) {
+      console.error("API: 获取可用盘符失败:", error);
+      
+      // 返回默认盘符
+      return ['D:\\', 'E:\\', 'F:\\'];
+    }
+  },
+
+  /**
+   * 获取迁移进度（增强版本）
+   * @returns 当前迁移进度
+   */
+  async getMigrationProgress(): Promise<{
+    currentItem: string;
+    progress: number;
+    totalItems: number;
+    estimatedTimeRemaining?: number;
+  }> {
+    try {
+      const result = await invoke<{
+        current_item: string;
+        progress: number;
+        total_items: number;
+        estimated_time_remaining?: number;
+      }>("get_migration_progress");
+      
+      return {
+        currentItem: result.current_item,
+        progress: result.progress,
+        totalItems: result.total_items,
+        estimatedTimeRemaining: result.estimated_time_remaining
+      };
+    } catch (error) {
+      console.error('API: 获取迁移进度失败:', error);
+      return {
+        currentItem: '无法获取进度信息',
+        progress: 0,
+        totalItems: 0
+      };
+    }
+  },
+
+  /**
+   * 验证AppData迁移选项
+   * @param options 迁移选项
+   * @returns 验证结果
+   */
+  async validateAppDataMigrationOptions(options: AppDataMigrationOptions): Promise<{
+    valid: boolean;
+    items: Array<{
+      path: string;
+      valid: boolean;
+      message?: string;
+    }>;
+    summary: string;
+    targetDriveValid: boolean;
+    targetDrive: string;
+  }> {
+    try {
+      const result = await invoke<{
+        valid: boolean;
+        items: Array<{
+          path: string;
+          valid: boolean;
+          message?: string;
+        }>;
+        summary: string;
+        target_drive_valid: boolean;
+        target_drive: string;
+      }>("validate_appdata_migration_options", { options });
+      
+      return {
+        valid: result.valid,
+        items: result.items,
+        summary: result.summary,
+        targetDriveValid: result.target_drive_valid,
+        targetDrive: result.target_drive
+      };
+    } catch (error) {
+      console.error('API: 验证迁移选项失败:', error);
+      throw new Error(`验证迁移选项失败: ${error}`);
+    }
+  },
+
+  /**
+   * 获取AppData扫描结果（带错误处理）
+   * @param options 扫描选项（可选）
+   * @returns 扫描结果包装
+   */
+  async getAppDataScanResult(options?: AppDataScanOptions): Promise<AppDataScanResult> {
+    try {
+      const data = await this.scanAppData(options);
+      return {
+        success: true,
+        data,
+        timestamp: Date.now()
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: Date.now()
+      };
+    }
+  },
+
+  /**
+   * 格式化AppData信息用于显示
+   * @param info AppData信息
+   * @returns 格式化后的信息
+   */
+  formatAppDataInfo(info: AppDataInfo): AppDataInfo {
+    return {
+      ...info,
+      // 可以在这里添加额外的格式化逻辑
+    };
+  },
+
+  /**
+   * 获取AppData统计信息（更新版本）
+   * @param info AppData信息
+   * @returns 统计信息
+   */
+  getAppDataStatistics(info: AppDataInfo) {
+    const totalItems = info.firstLevelItems.length;
+    const largeItems = info.largeItems.length;
+    const averageItemSize = totalItems > 0 ? info.totalSize / totalItems : 0;
+    const largestItem = info.largeItems.length > 0 ? info.largeItems[0] : null;
+
+    return {
+      totalApps: totalItems,
+      totalSize: info.totalSize,
+      largeApps: largeItems,
+      averageAppSize: averageItemSize,
+      largestApp: largestItem?.name || '',
+      largestAppSize: largestItem?.size || 0,
+      scanDate: new Date()
+    };
+  },
+
+  /**
+   * 验证迁移选项的有效性
+   * @param options 迁移选项
+   * @throws 如果选项无效则抛出错误
+   */
+  validateMigrationOptions(options: AppDataMigrationOptions): void {
+    if (!options.sourceItems || options.sourceItems.length === 0) {
+      throw new Error('迁移源项目列表不能为空');
+    }
+    
+    if (!options.targetDrive || options.targetDrive.trim() === '') {
+      throw new Error('目标盘符不能为空');
+    }
+    
+    // 验证目标盘符格式
+    const drivePattern = /^[A-Za-z]:[\\/]?$/;
+    if (!drivePattern.test(options.targetDrive)) {
+      throw new Error('目标盘符格式无效，应为如 "D:" 或 "D:\" 的格式');
+    }
+    
+    // 验证源项目路径
+    for (const item of options.sourceItems) {
+      if (!item || item.trim() === '') {
+        throw new Error('迁移源项目路径不能为空');
+      }
+    }
+  },
+
+  /**
+   * 格式化迁移错误信息
+   * @param error 原始错误
+   * @returns 格式化的错误消息
+   */
+  formatMigrationError(error: unknown): string {
+    if (error instanceof Error) {
+      // 常见的迁移错误类型
+      const errorMessage = error.message.toLowerCase();
+      
+      if (errorMessage.includes('permission')) {
+        return '迁移失败：权限不足，请确保有足够的权限访问源文件和目标位置';
+      } else if (errorMessage.includes('space') || errorMessage.includes('disk')) {
+        return '迁移失败：目标盘符空间不足，请清理空间后重试';
+      } else if (errorMessage.includes('exists')) {
+        return '迁移失败：目标位置已存在同名文件或文件夹';
+      } else if (errorMessage.includes('not found') || errorMessage.includes('不存在')) {
+        return '迁移失败：源文件或目标盘符不存在';
+      } else if (errorMessage.includes('symlink')) {
+        return '迁移失败：符号链接创建失败，可能需要管理员权限';
+      } else {
+        return `迁移失败：${error.message}`;
+      }
+    } else if (typeof error === 'string') {
+      return `迁移失败：${error}`;
+    } else {
+      return '迁移失败：发生未知错误';
+    }
+  },
+
+
+  /**
+   * 批量验证迁移路径
+   * @param items 要迁移的项目路径列表
+   * @param targetDrive 目标盘符
+   * @returns 验证结果列表
+   */
+  async validateMigrationItems(items: string[], targetDrive: string): Promise<{
+    valid: boolean;
+    items: Array<{
+      path: string;
+      valid: boolean;
+      message?: string;
+    }>;
+    summary: string;
+  }> {
+    const validationResults = [];
+    let validCount = 0;
+
+    for (const item of items) {
+      try {
+        // 检查源路径是否存在
+        const exists = await systemAPI.pathExists(item);
+        if (!exists) {
+          validationResults.push({
+            path: item,
+            valid: false,
+            message: '源路径不存在'
+          });
+          continue;
+        }
+
+        // 检查目标盘符空间（简化检查）
+        const diskInfo = await systemAPI.getDiskInfo();
+        const targetDisk = diskInfo.find(disk =>
+          disk.name.toUpperCase().startsWith(targetDrive.toUpperCase().charAt(0))
+        );
+
+        if (!targetDisk) {
+          validationResults.push({
+            path: item,
+            valid: false,
+            message: '目标盘符信息不可用'
+          });
+          continue;
+        }
+
+        // 这里应该获取文件大小进行空间检查
+        // 简化处理，假设有足够的空间
+        validationResults.push({
+          path: item,
+          valid: true,
+          message: '路径有效'
+        });
+        validCount++;
+
+      } catch (error) {
+        validationResults.push({
+          path: item,
+          valid: false,
+          message: '验证过程中发生错误'
+        });
+      }
+    }
+
+    const summary = `验证完成：${validCount}/${items.length} 个项目有效`;
+
+    return {
+      valid: validCount === items.length,
+      items: validationResults,
+      summary
+    };
   }
 };

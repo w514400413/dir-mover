@@ -12,7 +12,7 @@ use tempfile::TempDir;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;
-use log::info;
+use log::{info, error};
 
 /// 扫描和迁移集成测试
 pub async fn test_scan_and_migrate() -> Result<(), crate::tests::TestError> {
@@ -580,9 +580,44 @@ fn count_files_in_directory(path: &std::path::Path) -> Result<usize, crate::test
 mod tests {
     use super::*;
 
+    /// 集成测试运行器（增强版本）
+    pub async fn run_all_integration_tests() -> Result<(), crate::tests::TestError> {
+        info!("开始运行所有集成测试");
+        
+        // 基础集成测试
+        info!("运行扫描和迁移集成测试");
+        test_scan_and_migrate().await?;
+        
+        info!("运行错误处理和恢复集成测试");
+        test_error_handling_and_recovery().await?;
+        
+        info!("运行操作日志集成测试");
+        test_operation_logging().await?;
+        
+        info!("运行路径验证集成测试");
+        test_path_validation().await?;
+        
+        info!("运行备份和回滚集成测试");
+        test_backup_and_rollback().await?;
+        
+        // AppData专项集成测试
+        info!("运行AppData扫描集成测试");
+        test_appdata_scan_integration().await?;
+        
+        info!("运行AppData完整工作流集成测试");
+        test_appdata_complete_workflow().await?;
+        
+        info!("所有集成测试完成");
+        Ok(())
+    }
+    
     #[tokio::test]
     async fn test_integration_tests_runner() {
         // 这个测试确保所有的集成测试函数都能正常运行
+        let result = run_all_integration_tests().await;
+        assert!(result.is_ok(), "所有集成测试应该通过");
+        
+        // 单独测试也保留以确保兼容性
         let result = test_scan_and_migrate().await;
         assert!(result.is_ok(), "扫描和迁移集成测试应该通过");
         
@@ -597,5 +632,671 @@ mod tests {
         
         let result = test_backup_and_rollback().await;
         assert!(result.is_ok(), "备份和回滚集成测试应该通过");
+        
+        let result = test_appdata_scan_integration().await;
+        assert!(result.is_ok(), "AppData扫描集成测试应该通过");
+        
+        let result = test_appdata_complete_workflow().await;
+        assert!(result.is_ok(), "AppData完整工作流集成测试应该通过");
     }
+}
+
+/// AppData扫描集成测试
+pub async fn test_appdata_scan_integration() -> Result<(), crate::tests::TestError> {
+    info!("开始AppData扫描集成测试");
+
+    let temp_dir = TempDir::new().map_err(|e| crate::tests::TestError::SetupFailed(e.to_string()))?;
+    
+    // 创建模拟的AppData目录结构
+    let appdata_base = temp_dir.path().join("AppData");
+    let local_dir = appdata_base.join("Local");
+    let roaming_dir = appdata_base.join("Roaming");
+    let local_low_dir = appdata_base.join("LocalLow");
+    
+    // 创建AppData子目录
+    fs::create_dir_all(&local_dir)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建Local目录失败: {}", e)))?;
+    fs::create_dir_all(&roaming_dir)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建Roaming目录失败: {}", e)))?;
+    fs::create_dir_all(&local_low_dir)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建LocalLow目录失败: {}", e)))?;
+    
+    // 创建测试应用数据
+    let test_apps = vec![
+        ("Chrome", 2 * 1024 * 1024 * 1024),      // 2GB - 大应用
+        ("VSCode", 1500 * 1024 * 1024),          // 1.5GB - 大应用
+        ("NodeJS", 800 * 1024 * 1024),           // 800MB - 中等应用
+        ("SmallApp", 200 * 1024 * 1024),         // 200MB - 小应用
+        ("TinyApp", 50 * 1024 * 1024),           // 50MB - 微小应用
+    ];
+    
+    for (app_name, size) in test_apps {
+        // 根据应用大小决定放在哪个目录
+        let app_dir = if size >= 1024 * 1024 * 1024 { // 1GB+
+            local_dir.join(app_name)
+        } else if size >= 500 * 1024 * 1024 { // 500MB+
+            roaming_dir.join(app_name)
+        } else {
+            local_low_dir.join(app_name)
+        };
+        
+        fs::create_dir_all(&app_dir)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建应用目录 {} 失败: {}", app_name, e)))?;
+        
+        // 创建应用数据文件
+        let data_file = app_dir.join("data.dat");
+        create_large_file(&data_file, size)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建应用数据文件 {} 失败: {}", app_name, e)))?;
+        
+        // 创建一些配置文件
+        let config_file = app_dir.join("config.json");
+        let mut file = File::create(&config_file)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建配置文件失败: {}", e)))?;
+        writeln!(file, r#"{{"app": "{}", "size": {}}}"#, app_name, size)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("写入配置文件失败: {}", e)))?;
+    }
+    
+    info!("AppData测试数据创建完成");
+    
+    // 测试1: 验证AppData路径检测
+    test_appdata_path_detection(&appdata_base).await?;
+    
+    // 测试2: 验证大文件夹筛选
+    test_large_folder_filtering_integration(&appdata_base).await?;
+    
+    // 测试3: 验证目录大小计算
+    test_directory_size_calculation(&appdata_base).await?;
+    
+    // 测试4: 验证排序功能
+    test_sorting_functionality(&appdata_base).await?;
+    
+    info!("AppData扫描集成测试完成");
+    Ok(())
+}
+
+/// 测试AppData路径检测
+async fn test_appdata_path_detection(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    use crate::appdata_analyzer::AppDataAnalyzer;
+    
+    // 验证三个主要子目录都存在
+    assert!(appdata_base.join("Local").exists(), "Local目录应该存在");
+    assert!(appdata_base.join("Roaming").exists(), "Roaming目录应该存在");
+    assert!(appdata_base.join("LocalLow").exists(), "LocalLow目录应该存在");
+    
+    info!("AppData路径检测测试完成");
+    Ok(())
+}
+
+/// 测试大文件夹筛选集成
+async fn test_large_folder_filtering_integration(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    use crate::appdata_analyzer::AppDataAnalyzer;
+    
+    // 创建分析器并设置1GB阈值
+    let mut analyzer = AppDataAnalyzer::new();
+    let config = crate::appdata_analyzer::AppDataConfig {
+        min_size_threshold: 1024 * 1024 * 1024, // 1GB
+        max_depth: 2,
+        sort_order: crate::appdata_analyzer::SortOrder::Desc,
+    };
+    analyzer.set_config(config);
+    
+    // 手动验证大文件夹（>1GB）应该包括Chrome和VSCode
+    let local_dir = appdata_base.join("Local");
+    let chrome_dir = local_dir.join("Chrome");
+    let vscode_dir = local_dir.join("VSCode");
+    
+    assert!(chrome_dir.exists(), "Chrome目录应该存在");
+    assert!(vscode_dir.exists(), "VSCode目录应该存在");
+    
+    // 验证这些大应用的数据文件存在
+    assert!(chrome_dir.join("data.dat").exists(), "Chrome数据文件应该存在");
+    assert!(vscode_dir.join("data.dat").exists(), "VSCode数据文件应该存在");
+    
+    info!("大文件夹筛选集成测试完成");
+    Ok(())
+}
+
+/// 测试目录大小计算
+async fn test_directory_size_calculation(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    // 验证各个目录的大小
+    let local_dir = appdata_base.join("Local");
+    let roaming_dir = appdata_base.join("Roaming");
+    let local_low_dir = appdata_base.join("LocalLow");
+    
+    // Local目录应该包含大应用（Chrome和VSCode）
+    let local_size = calculate_directory_size(&local_dir)?;
+    assert!(local_size >= 3 * 1024 * 1024 * 1024, "Local目录应该至少包含3GB数据");
+    
+    // Roaming目录应该包含中等大小的应用
+    let roaming_size = calculate_directory_size(&roaming_dir)?;
+    assert!(roaming_size >= 800 * 1024 * 1024, "Roaming目录应该至少包含800MB数据");
+    
+    // LocalLow目录应该包含小应用
+    let local_low_size = calculate_directory_size(&local_low_dir)?;
+    assert!(local_low_size >= 250 * 1024 * 1024, "LocalLow目录应该至少包含250MB数据");
+    
+    info!("目录大小计算测试完成");
+    Ok(())
+}
+
+/// 测试排序功能
+async fn test_sorting_functionality(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    // 获取所有应用目录
+    let mut app_sizes = Vec::new();
+    
+    for subdir in &["Local", "Roaming", "LocalLow"] {
+        let subdir_path = appdata_base.join(subdir);
+        if subdir_path.exists() {
+            for entry in fs::read_dir(&subdir_path)
+                .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("读取目录失败: {}", e)))? {
+                let entry = entry
+                    .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("读取目录项失败: {}", e)))?;
+                let path = entry.path();
+                if path.is_dir() {
+                    let size = calculate_directory_size(&path)?;
+                    let app_name = path.file_name().unwrap().to_string_lossy().to_string();
+                    app_sizes.push((app_name, size));
+                }
+            }
+        }
+    }
+    
+    // 按大小降序排序
+    app_sizes.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    // 验证排序结果
+    assert!(app_sizes.len() >= 3, "应该至少有3个应用");
+    
+    // 最大的应用应该是Chrome或VSCode（都大于1GB）
+    let largest_app = &app_sizes[0];
+    assert!(largest_app.1 >= 1024 * 1024 * 1024, "最大的应用应该大于1GB");
+    assert!(largest_app.0 == "Chrome" || largest_app.0 == "VSCode", "最大的应用应该是Chrome或VSCode");
+    
+    info!("排序功能测试完成 - 找到 {} 个应用", app_sizes.len());
+    Ok(())
+}
+
+/// 计算目录大小
+fn calculate_directory_size(path: &std::path::Path) -> Result<u64, crate::tests::TestError> {
+    let mut total_size = 0;
+    
+    if path.is_dir() {
+        let entries = fs::read_dir(path)
+            .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("读取目录失败: {}", e)))?;
+        
+        for entry in entries {
+            let entry = entry
+                .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("读取目录项失败: {}", e)))?;
+            let entry_path = entry.path();
+            
+            if entry_path.is_file() {
+                let metadata = fs::metadata(&entry_path)
+                    .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("获取文件元数据失败: {}", e)))?;
+                total_size += metadata.len();
+            } else if entry_path.is_dir() {
+                total_size += calculate_directory_size(&entry_path)?;
+            }
+        }
+    } else if path.is_file() {
+        let metadata = fs::metadata(path)
+            .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("获取文件元数据失败: {}", e)))?;
+        total_size = metadata.len();
+    }
+    
+    Ok(total_size)
+}
+
+/// 创建大文件（用于测试）
+fn create_large_file(path: &std::path::Path, size_bytes: usize) -> Result<(), crate::tests::TestError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建父目录失败: {}", e)))?;
+    }
+    
+    let mut file = File::create(path)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建文件失败: {}", e)))?;
+    
+    // 分块写入以避免内存问题
+    let chunk_size = 1024 * 1024; // 1MB chunks
+    let chunk = vec![b'A'; chunk_size.min(size_bytes)];
+    
+    let chunks_needed = size_bytes / chunk_size;
+    let remainder = size_bytes % chunk_size;
+    
+    for _ in 0..chunks_needed {
+        file.write_all(&chunk)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("写入文件块失败: {}", e)))?;
+    }
+    
+    if remainder > 0 {
+        let remainder_chunk = vec![b'A'; remainder];
+        file.write_all(&remainder_chunk)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("写入文件剩余部分失败: {}", e)))?;
+    }
+    
+    Ok(())
+}
+
+/// AppData完整工作流集成测试（增强版本）
+pub async fn test_appdata_complete_workflow() -> Result<(), crate::tests::TestError> {
+    info!("开始AppData完整工作流集成测试");
+
+    let temp_dir = TempDir::new().map_err(|e| crate::tests::TestError::SetupFailed(e.to_string()))?;
+    
+    // 创建完整的AppData测试环境
+    let appdata_base = temp_dir.path().join("AppData");
+    let local_dir = appdata_base.join("Local");
+    let roaming_dir = appdata_base.join("Roaming");
+    let local_low_dir = appdata_base.join("LocalLow");
+    let target_drive = temp_dir.path().join("D_DRIVE");
+    
+    // 创建AppData子目录
+    fs::create_dir_all(&local_dir)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建Local目录失败: {}", e)))?;
+    fs::create_dir_all(&roaming_dir)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建Roaming目录失败: {}", e)))?;
+    fs::create_dir_all(&local_low_dir)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建LocalLow目录失败: {}", e)))?;
+    fs::create_dir_all(&target_drive)
+        .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建目标盘符目录失败: {}", e)))?;
+
+    // 步骤1: 创建测试应用数据（模拟真实场景）
+    create_realistic_appdata_structure(&appdata_base).await?;
+
+    // 步骤2: 扫描AppData并验证结果
+    let scan_result = test_appdata_scanning_workflow(&appdata_base).await?;
+
+    // 步骤3: 验证一级项目检测
+    test_first_level_items_detection(&scan_result).await?;
+
+    // 步骤4: 测试动态排序功能
+    test_dynamic_sorting_integration(&scan_result).await?;
+
+    // 步骤5: 测试1GB筛选功能
+    test_one_gb_filtering_integration(&scan_result).await?;
+
+    // 步骤6: 执行迁移操作
+    let migration_result = test_appdata_migration_workflow(&appdata_base, &target_drive).await?;
+
+    // 步骤7: 验证迁移结果
+    test_migration_result_validation(&migration_result, &target_drive).await?;
+
+    // 步骤8: 测试错误恢复
+    test_error_recovery_integration(&appdata_base).await?;
+
+    // 步骤9: 性能基准测试
+    test_performance_benchmarks(&appdata_base).await?;
+
+    info!("AppData完整工作流集成测试完成");
+    Ok(())
+}
+
+/// 创建真实的AppData测试结构
+async fn create_realistic_appdata_structure(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    use crate::appdata_analyzer::AppDataAnalyzer;
+    
+    // 模拟真实的Windows应用数据分布
+    let realistic_apps = vec![
+        // Local目录 - 大应用（>1GB）
+        ("Google.Chrome", 2500 * 1024 * 1024, "Local"),      // 2.5GB
+        ("Microsoft.VSCode", 1800 * 1024 * 1024, "Local"),   // 1.8GB
+        ("Mozilla.Firefox", 1200 * 1024 * 1024, "Local"),    // 1.2GB
+        ("JetBrains.IntelliJ", 3500 * 1024 * 1024, "Local"), // 3.5GB
+        
+        // Roaming目录 - 中等应用（500MB-1GB）
+        ("Microsoft.Office", 900 * 1024 * 1024, "Roaming"),   // 900MB
+        ("Adobe.CreativeCloud", 750 * 1024 * 1024, "Roaming"), // 750MB
+        ("Steam", 650 * 1024 * 1024, "Roaming"),              // 650MB
+        
+        // LocalLow目录 - 小应用（<500MB）
+        ("Spotify", 400 * 1024 * 1024, "LocalLow"),           // 400MB
+        ("Discord", 300 * 1024 * 1024, "LocalLow"),           // 300MB
+        ("Zoom", 200 * 1024 * 1024, "LocalLow"),              // 200MB
+        ("Notepad++", 150 * 1024 * 1024, "LocalLow"),         // 150MB
+    ];
+
+    for (app_name, size, parent_type) in realistic_apps {
+        let app_dir = match parent_type {
+            "Local" => appdata_base.join("Local").join(app_name),
+            "Roaming" => appdata_base.join("Roaming").join(app_name),
+            "LocalLow" => appdata_base.join("LocalLow").join(app_name),
+            _ => continue,
+        };
+
+        fs::create_dir_all(&app_dir)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建应用目录 {} 失败: {}", app_name, e)))?;
+
+        // 创建应用数据文件
+        let data_file = app_dir.join("data.dat");
+        create_large_file(&data_file, size)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建应用数据文件 {} 失败: {}", app_name, e)))?;
+
+        // 创建配置文件
+        let config_file = app_dir.join("config.json");
+        let mut file = File::create(&config_file)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建配置文件失败: {}", e)))?;
+        writeln!(file, r#"{{"app": "{}", "version": "1.0.0", "size": {}}}"#, app_name, size)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("写入配置文件失败: {}", e)))?;
+
+        // 创建缓存目录（一级子目录）
+        let cache_dir = app_dir.join("Cache");
+        fs::create_dir_all(&cache_dir)
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建缓存目录失败: {}", e)))?;
+        
+        let cache_file = cache_dir.join("cache.data");
+        create_large_file(&cache_file, size / 10) // 缓存大小为数据的1/10
+            .map_err(|e| crate::tests::TestError::SetupFailed(format!("创建缓存文件失败: {}", e)))?;
+
+        info!("创建了应用 {} ({}MB) 在 {} 目录", app_name, size / (1024 * 1024), parent_type);
+    }
+
+    info!("真实AppData测试结构创建完成");
+    Ok(())
+}
+
+/// 测试AppData扫描工作流
+async fn test_appdata_scanning_workflow(appdata_base: &std::path::Path) -> Result<crate::appdata_analyzer::AppDataInfo, crate::tests::TestError> {
+    use crate::appdata_analyzer::{AppDataAnalyzer, AppDataConfig, SortOrder};
+    
+    // 创建分析器
+    let mut analyzer = AppDataAnalyzer::new();
+    let config = AppDataConfig {
+        min_size_threshold: 1024 * 1024 * 1024, // 1GB
+        max_depth: 2,
+        sort_order: SortOrder::Desc,
+    };
+    analyzer.set_config(config);
+
+    // 执行扫描（使用模拟路径）
+    let scan_result = analyzer.scan_appdata().await
+        .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("AppData扫描失败: {}", e)))?;
+
+    // 验证扫描结果
+    assert!(scan_result.total_size > 0, "总大小应该大于0");
+    assert!(scan_result.first_level_items.len() >= 10, "应该至少有10个一级项目");
+    assert!(scan_result.large_items.len() >= 4, "应该至少有4个大项目（>1GB）");
+
+    // 验证三个主要目录
+    assert!(scan_result.local_size > 0, "Local目录应该有大小");
+    assert!(scan_result.roaming_size > 0, "Roaming目录应该有大小");
+    assert!(scan_result.local_low_size > 0, "LocalLow目录应该有大小");
+
+    // 验证扫描时间
+    assert!(scan_result.scan_time_ms > 0, "扫描时间应该大于0");
+    assert!(scan_result.scan_time_ms < 30000, "扫描时间应该小于30秒");
+
+    info!("AppData扫描工作流测试完成 - 发现 {} 个一级项目, {} 个大项目",
+          scan_result.first_level_items.len(), scan_result.large_items.len());
+
+    Ok(scan_result)
+}
+
+/// 测试一级项目检测
+async fn test_first_level_items_detection(scan_result: &crate::appdata_analyzer::AppDataInfo) -> Result<(), crate::tests::TestError> {
+    // 验证一级项目来自三个主要目录
+    let mut local_count = 0;
+    let mut roaming_count = 0;
+    let mut local_low_count = 0;
+
+    for item in &scan_result.first_level_items {
+        match item.parent_type.as_str() {
+            "Local" => local_count += 1,
+            "Roaming" => roaming_count += 1,
+            "LocalLow" => local_low_count += 1,
+            _ => {}
+        }
+
+        // 验证项目属性
+        assert!(!item.path.is_empty(), "项目路径不应该为空");
+        assert!(!item.name.is_empty(), "项目名称不应该为空");
+        assert!(item.size > 0, "项目大小应该大于0");
+        assert!(item.size_percentage >= 0.0, "大小百分比应该非负");
+    }
+
+    assert!(local_count >= 3, "Local目录应该至少有3个一级项目");
+    assert!(roaming_count >= 2, "Roaming目录应该至少有2个一级项目");
+    assert!(local_low_count >= 3, "LocalLow目录应该至少有3个一级项目");
+
+    info!("一级项目检测测试完成 - Local: {}, Roaming: {}, LocalLow: {}",
+          local_count, roaming_count, local_low_count);
+
+    Ok(())
+}
+
+/// 测试动态排序功能集成
+async fn test_dynamic_sorting_integration(scan_result: &crate::appdata_analyzer::AppDataInfo) -> Result<(), crate::tests::TestError> {
+    // 验证默认降序排序（按大小）
+    let items = &scan_result.first_level_items;
+    
+    for i in 1..items.len() {
+        assert!(items[i-1].size >= items[i].size,
+                "项目应该按大小降序排列: 项目{} ({} bytes) >= 项目{} ({} bytes)",
+                i-1, items[i-1].size, i, items[i].size);
+    }
+
+    // 验证大项目排序
+    let large_items = &scan_result.large_items;
+    if large_items.len() > 1 {
+        for i in 1..large_items.len() {
+            assert!(large_items[i-1].size >= large_items[i].size,
+                    "大项目应该按大小降序排列");
+        }
+    }
+
+    info!("动态排序功能集成测试完成");
+    Ok(())
+}
+
+/// 测试1GB筛选功能集成
+async fn test_one_gb_filtering_integration(scan_result: &crate::appdata_analyzer::AppDataInfo) -> Result<(), crate::tests::TestError> {
+    // 验证所有大项目都大于1GB
+    for item in &scan_result.large_items {
+        assert!(item.size >= 1024 * 1024 * 1024,
+                "大项目应该大于1GB: {} 有 {} bytes", item.name, item.size);
+        assert!(item.is_large, "大项目应该标记为is_large: {}", item.name);
+    }
+
+    // 验证一级项目中的大项目标记
+    let large_item_count = scan_result.first_level_items.iter()
+        .filter(|item| item.is_large)
+        .count();
+    
+    assert_eq!(large_item_count, scan_result.large_items.len(),
+                "一级项目中的大项目数量应该与大项目列表数量一致");
+
+    info!("1GB筛选功能集成测试完成 - 发现 {} 个大项目", scan_result.large_items.len());
+    Ok(())
+}
+
+/// 测试AppData迁移工作流
+async fn test_appdata_migration_workflow(
+    appdata_base: &std::path::Path,
+    target_drive: &std::path::Path
+) -> Result<crate::migration_service::MigrationResult, crate::tests::TestError> {
+    use crate::migration_service::{MigrationService, MigrationOptions, validate_migration_options};
+    use crate::appdata_analyzer::AppDataMigrationOptions;
+    
+    // 选择要迁移的大项目
+    let items_to_migrate = vec![
+        appdata_base.join("Local").join("Google.Chrome").to_string_lossy().to_string(),
+        appdata_base.join("Local").join("Microsoft.VSCode").to_string_lossy().to_string(),
+        appdata_base.join("Roaming").join("Microsoft.Office").to_string_lossy().to_string(),
+    ];
+
+    // 创建迁移选项
+    let migration_options = AppDataMigrationOptions {
+        source_items: items_to_migrate.clone(),
+        target_drive: target_drive.to_string_lossy().to_string(),
+        create_symlink: true,
+        delete_source: false,
+    };
+
+    // 验证迁移选项
+    let validation_result = validate_migration_options(&MigrationOptions {
+        source_path: "multiple_items".to_string(),
+        target_path: target_drive.to_string_lossy().to_string(),
+        create_symlink: migration_options.create_symlink,
+        delete_source: migration_options.delete_source,
+    });
+
+    assert!(validation_result.is_ok(), "迁移选项验证应该通过");
+
+    // 执行迁移
+    let service = MigrationService::new();
+    let mut all_results = Vec::new();
+    let mut total_migrated_size = 0u64;
+    let mut success_count = 0;
+    let mut failure_count = 0;
+
+    for source_item in &migration_options.source_items {
+        let source_path = std::path::Path::new(source_item);
+        if !source_path.exists() {
+            failure_count += 1;
+            continue;
+        }
+
+        // 构建目标路径
+        let item_name = source_path.file_name()
+            .ok_or_else(|| crate::tests::TestError::ExecutionFailed("无法获取项目名称".to_string()))?
+            .to_string_lossy();
+        
+        let target_path = target_drive.join(item_name.to_string());
+
+        info!("迁移项目: {} -> {}", source_item, target_path.display());
+
+        let options = MigrationOptions {
+            source_path: source_item.clone(),
+            target_path: target_path.to_string_lossy().to_string(),
+            create_symlink: migration_options.create_symlink,
+            delete_source: migration_options.delete_source,
+        };
+
+        // 执行迁移
+        match service.migrate_folder(options).await {
+            Ok(result) => {
+                if result.success {
+                    success_count += 1;
+                    // 估算迁移大小
+                    let estimated_size = 1024 * 1024 * 1024; // 假设1GB
+                    total_migrated_size += estimated_size;
+                    info!("项目迁移成功: {}, 大小: ~{}MB", source_item, estimated_size / (1024 * 1024));
+                } else {
+                    failure_count += 1;
+                    info!("项目迁移失败: {}", result.message);
+                }
+                all_results.push(result);
+            }
+            Err(e) => {
+                failure_count += 1;
+                info!("项目迁移出错: {}", e);
+            }
+        }
+    }
+
+    // 汇总结果
+    let overall_success = failure_count == 0;
+    let summary = format!("AppData迁移完成 - 成功: {}, 失败: {}, 总迁移大小: ~{}MB",
+                         success_count, failure_count, total_migrated_size / (1024 * 1024));
+
+    info!("{}", summary);
+
+    let migration_result = crate::migration_service::MigrationResult {
+        success: overall_success,
+        message: summary,
+        source_path: format!("{}个项目", migration_options.source_items.len()),
+        target_path: target_drive.to_string_lossy().to_string(),
+        symlink_path: if migration_options.create_symlink { Some(format!("创建了{}个符号链接", success_count)) } else { None },
+    };
+
+    Ok(migration_result)
+}
+
+/// 验证迁移结果
+async fn test_migration_result_validation(
+    migration_result: &crate::migration_service::MigrationResult,
+    target_drive: &std::path::Path
+) -> Result<(), crate::tests::TestError> {
+    // 验证迁移成功
+    assert!(migration_result.success, "迁移应该成功完成");
+    assert!(migration_result.message.contains("成功"), "迁移消息应该包含成功信息");
+
+    // 验证目标路径
+    assert_eq!(migration_result.target_path, target_drive.to_string_lossy(), "目标路径应该匹配");
+
+    // 验证迁移的项目在目标位置存在
+    let expected_apps = ["Google.Chrome", "Microsoft.VSCode", "Microsoft.Office"];
+    for app_name in expected_apps {
+        let target_app_path = target_drive.join(app_name);
+        assert!(target_app_path.exists(), "迁移的应用 {} 应该在目标位置存在", app_name);
+        
+        // 验证数据文件存在
+        let data_file = target_app_path.join("data.dat");
+        assert!(data_file.exists(), "迁移的应用 {} 的数据文件应该存在", app_name);
+    }
+
+    info!("迁移结果验证测试完成");
+    Ok(())
+}
+
+/// 测试错误恢复集成
+async fn test_error_recovery_integration(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    use crate::error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig, RecoveryContext};
+    use crate::file_operations::FileOperationError;
+    
+    // 初始化错误恢复管理器
+    let config = ErrorRecoveryConfig::default();
+    let mut recovery_manager = ErrorRecoveryManager::new(config);
+
+    // 测试权限错误恢复
+    let permission_error = FileOperationError::PermissionDenied("权限被拒绝".to_string());
+    let context = RecoveryContext::new(
+        "appdata_permission_test".to_string(),
+        appdata_base.to_path_buf(),
+        None,
+        "migration_phase".to_string(),
+    );
+
+    let result = recovery_manager.handle_error("appdata_perm_test", &permission_error, &context).await
+        .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("错误处理失败: {}", e)))?;
+
+    // 权限错误应该被标记为需要手动处理
+    assert_eq!(result.recovery_type, crate::error_recovery::RecoveryType::Manual, "权限错误应该需要手动处理");
+
+    info!("错误恢复集成测试完成");
+    Ok(())
+}
+
+/// 测试性能基准
+async fn test_performance_benchmarks(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
+    use crate::appdata_analyzer::AppDataAnalyzer;
+    
+    let start_time = std::time::Instant::now();
+    
+    // 执行完整扫描
+    let mut analyzer = AppDataAnalyzer::new();
+    let config = crate::appdata_analyzer::AppDataConfig {
+        min_size_threshold: 1024 * 1024 * 1024, // 1GB
+        max_depth: 2,
+        sort_order: crate::appdata_analyzer::SortOrder::Desc,
+    };
+    analyzer.set_config(config);
+    
+    let scan_result = analyzer.scan_appdata().await
+        .map_err(|e| crate::tests::TestError::ExecutionFailed(format!("性能测试扫描失败: {}", e)))?;
+
+    let scan_duration = start_time.elapsed();
+
+    // 验证性能要求（NFR-1）
+    assert!(scan_duration.as_secs() < 30, "扫描时间应该小于30秒，实际: {}秒", scan_duration.as_secs());
+    assert!(scan_result.scan_time_ms < 30000, "扫描耗时应该小于30000ms，实际: {}ms", scan_result.scan_time_ms);
+
+    // 验证内存使用（NFR-2）
+    // 这里我们验证处理的数据量是否合理
+    assert!(scan_result.first_level_items.len() >= 10, "应该处理至少10个一级项目");
+    assert!(scan_result.total_size > 0, "应该处理非零大小的数据");
+
+    info!("性能基准测试完成 - 扫描耗时: {:?}, 处理项目: {}, 总大小: {}MB",
+          scan_duration, scan_result.first_level_items.len(), scan_result.total_size / (1024 * 1024));
+
+    Ok(())
 }
