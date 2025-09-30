@@ -6,13 +6,14 @@
 
 import type {
   AppDataFirstLevelItem,
-  AppDataInfo,
   AppDataScanEvent,
   SortOrder,
-  AppDataSortField
+  AppDataSortField,
+  RealTimeScanData,
+  CacheStatistics
 } from './appdata';
 
-// 从appdata重新导出需要的类型
+// 重新导出从appdata导入的类型，使它们可在realtime模块中使用
 export type { RealTimeScanData, CacheStatistics } from './appdata';
 
 /**

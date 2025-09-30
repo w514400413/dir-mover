@@ -4,7 +4,7 @@
  * 支持事件驱动、内存优化和性能监控
  */
 
-import { ref, reactive, computed, watch, type Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import type {
   IRealTimeDataManager,
   RealTimeDataManagerConfig,
@@ -25,7 +25,6 @@ import type {
   EventEmitter
 } from '../types/realtime';
 import type { AppDataScanEvent, AppDataFirstLevelItem } from '../types/appdata';
-import { appDataAPI } from './api';
 
 /**
  * 默认配置
