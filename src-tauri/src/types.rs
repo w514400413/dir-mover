@@ -1,5 +1,4 @@
 use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
 use std::time::SystemTime;
 
 /// 目录信息结构体（与前端共享）

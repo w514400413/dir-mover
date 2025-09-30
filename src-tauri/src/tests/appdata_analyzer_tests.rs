@@ -6,10 +6,6 @@ use std::fs;
 use std::path::Path;
 use std::fs::File;
 use std::io::Write;
-use tempfile::TempDir;
-use log::{info, warn};
-use crate::appdata_analyzer::{AppDataAnalyzer, AppDataConfig, SortOrder, AppDataFirstLevelItem, AppDataMigrationOptions};
-use crate::tests::test_utils::{TestDataGenerator, TestAsserter, PerformanceMeasurer};
 
 /// 测试AppData路径检测
 #[test]

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use std::fs::File;
 use std::io::Write;
-use log::{info, warn};
+use log::info;
 use tempfile::TempDir;
 
 /// 测试数据生成器

@@ -2,15 +2,14 @@
 //! 
 //! 测试各个模块的独立功能
 
-use crate::disk_analyzer::{DiskAnalyzer, DirectoryInfo};
-use crate::file_operations::{FileOperator, FileOperationResult};
+use crate::disk_analyzer::DiskAnalyzer;
+use crate::file_operations::FileOperator;
 use crate::migration_service::{MigrationService, MigrationOptions};
 use crate::error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig};
 use crate::operation_logger::{OperationLogger, OperationType, OperationStatus};
 use tempfile::TempDir;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
 use log::info;
 
 /// 磁盘分析器单元测试

@@ -3,7 +3,6 @@
 //! 测试完整的用户场景和工作流程
 
 use crate::disk_analyzer::DiskAnalyzer;
-use crate::file_operations::FileOperator;
 use crate::migration_service::{MigrationService, MigrationOptions};
 use crate::error_recovery::{ErrorRecoveryManager, ErrorRecoveryConfig, RecoveryContext};
 use crate::operation_logger::{OperationLogger, OperationType, OperationStatus};

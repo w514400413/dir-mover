@@ -11,8 +11,7 @@ use crate::tests::test_utils::create_test_directory_structure;
 use tempfile::TempDir;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
-use log::{info, error};
+use log::info;
 
 /// 扫描和迁移集成测试
 pub async fn test_scan_and_migrate() -> Result<(), crate::tests::TestError> {
@@ -236,7 +235,7 @@ async fn test_complete_operation_lifecycle(logger: &OperationLogger) -> Result<(
 /// 测试并发操作记录
 async fn test_concurrent_operation_logging(logger: OperationLogger) -> Result<(), crate::tests::TestError> {
     use tokio::task;
-    use std::sync::Arc;
+    
     
     // 创建多个并发操作 - 每个任务使用独立的 logger
     let mut handles = vec![];
@@ -716,7 +715,7 @@ pub async fn test_appdata_scan_integration() -> Result<(), crate::tests::TestErr
 
 /// 测试AppData路径检测
 async fn test_appdata_path_detection(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
-    use crate::appdata_analyzer::AppDataAnalyzer;
+    
     
     // 验证三个主要子目录都存在
     assert!(appdata_base.join("Local").exists(), "Local目录应该存在");
@@ -933,7 +932,7 @@ pub async fn test_appdata_complete_workflow() -> Result<(), crate::tests::TestEr
 
 /// 创建真实的AppData测试结构
 async fn create_realistic_appdata_structure(appdata_base: &std::path::Path) -> Result<(), crate::tests::TestError> {
-    use crate::appdata_analyzer::AppDataAnalyzer;
+    
     
     // 模拟真实的Windows应用数据分布
     let realistic_apps = vec![

@@ -3,7 +3,7 @@ use std::fs;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Local};
-use log::{info, error, warn, debug};
+use log::{info, error, warn};
 use uuid::Uuid;
 
 /// 错误类型枚举

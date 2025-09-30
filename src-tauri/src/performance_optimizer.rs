@@ -3,7 +3,7 @@
 //! 提供内存优化、缓存管理、并发控制等性能优化功能
 
 use std::sync::{Arc, Mutex, RwLock};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -653,9 +653,9 @@ impl SmartBatchProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
-    use std::fs::File;
-    use std::io::Write;
+    
+    
+    
 
     #[tokio::test]
     async fn test_performance_optimizer() {

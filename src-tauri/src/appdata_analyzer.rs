@@ -7,7 +7,7 @@ use log::{info, warn, error, debug};
 use serde::{Serialize, Deserialize};
 
 use crate::disk_analyzer::{DiskAnalyzer};
-use crate::performance_optimizer::{PerformanceOptimizer, PerformanceConfig, PerformanceStats};
+use crate::performance_optimizer::{PerformanceOptimizer, PerformanceConfig};
 
 /// AppData 分析器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,12 +3,10 @@
 //! 测试系统在各种负载下的性能表现
 
 use crate::disk_analyzer::DiskAnalyzer;
-use crate::file_operations::FileOperator;
 use crate::migration_service::{MigrationService, MigrationOptions};
 use tempfile::TempDir;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use log::info;
 use sysinfo::{System, SystemExt, ProcessExt, CpuExt};

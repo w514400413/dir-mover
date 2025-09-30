@@ -21,7 +21,7 @@ use migration_service::{MigrationService, MigrationOptions, MigrationResult, val
 use operation_logger::{OperationLogger, OperationStatistics};
 use performance_optimizer::{PerformanceOptimizer, PerformanceConfig};
 use types::PathValidationResult;
-use appdata_analyzer::{AppDataAnalyzer, AppDataInfo, AppDataConfig, SortOrder, AppDataMigrationOptions};
+use appdata_analyzer::{AppDataAnalyzer, AppDataInfo, AppDataConfig, AppDataMigrationOptions};
 
 /// 应用状态
 struct AppState {
@@ -532,7 +532,7 @@ async fn scan_appdata(config: Option<AppDataConfig>, state: State<'_, AppState>)
     let mut analyzer = AppDataAnalyzer::new();
     
     // 应用配置（如果有）
-    if let Some(mut config) = config {
+    if let Some(config) = config {
         let min_size = config.min_size_threshold;
         let max_depth = config.max_depth;
         let sort_order = config.sort_order.clone();
