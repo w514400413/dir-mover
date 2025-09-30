@@ -1,0 +1,14 @@
+{
+  "filePath": ".spec-workflow/specs/appdata-analysis-tab/requirements.md",
+  "currentVersion": 1,
+  "snapshots": [
+    {
+      "version": 1,
+      "filename": "snapshot-001.json",
+      "timestamp": "2025-09-30T06:24:40.625Z",
+      "trigger": "initial",
+      "approvalId": "approval_1759213480587_2tctwzup5",
+      "approvalTitle": "前端AppData分析Tab页需求文档审批"
+    }
+  ]
+}

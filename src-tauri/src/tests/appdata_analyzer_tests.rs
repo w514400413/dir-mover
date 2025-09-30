@@ -2,6 +2,8 @@
 //!
 //! 测试AppData路径检测、扫描逻辑和筛选功能
 
+#![cfg(test)]
+
 use std::fs;
 use std::path::Path;
 use std::fs::File;

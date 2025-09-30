@@ -431,9 +431,6 @@ async function startScan() {
     
     ElMessage.info('开始扫描AppData目录...');
     
-    // 模拟进度更新
-    simulateProgress();
-    
     const options: AppDataScanOptions = {
       minSizeThreshold: 1024 * 1024 * 1024, // 1GB
       maxDepth: 2,
@@ -441,21 +438,85 @@ async function startScan() {
       showOnlyLarge: showOnlyLarge.value
     };
     
-    const result = await appDataAPI.scanAppData(options);
-    scanResult.value = {
-      success: true,
-      data: result,
-      timestamp: Date.now()
-    };
+    // 使用流式扫描，实时接收事件
+    const result = await appDataAPI.scanAppDataStreaming(options, (event) => {
+      console.log('收到扫描事件:', event);
+      
+      if (event.type === 'DirectoryStarted') {
+        // 更新当前扫描的目录
+        currentPath.value = `正在扫描: ${event.name}`;
+        ElMessage.info(`开始扫描 ${event.name} 目录...`);
+      } else if (event.type === 'ItemFound') {
+        // 实时添加项目到临时列表
+        const newItem = event.item;
+        largeItemsFound.value++;
+        
+        // 更新进度
+        const currentProgress = Math.min((largeItemsFound.value / 50) * 100, 90); // 假设最多50个项目
+        progress.value = Math.max(progress.value, currentProgress);
+        
+        // 实时更新显示（简化版本）
+        if (!scanResult.value) {
+          scanResult.value = {
+            success: true,
+            data: {
+              localPath: '',
+              localLowPath: '',
+              roamingPath: '',
+              localSize: 0,
+              localLowSize: 0,
+              roamingSize: 0,
+              totalSize: 0,
+              firstLevelItems: [],
+              largeItems: [],
+              scanTimeMs: 0
+            },
+            timestamp: Date.now()
+          };
+        }
+        
+        // 添加项目到列表
+        if (scanResult.value.data) {
+          scanResult.value.data.firstLevelItems.push(newItem);
+          if (newItem.isLarge) {
+            scanResult.value.data.largeItems.push(newItem);
+          }
+          scanResult.value.data.totalSize += newItem.size;
+          
+          // 根据父目录类型更新大小
+          if (newItem.parentType === 'Local') {
+            scanResult.value.data.localSize += newItem.size;
+          } else if (newItem.parentType === 'LocalLow') {
+            scanResult.value.data.localLowSize += newItem.size;
+          } else if (newItem.parentType === 'Roaming') {
+            scanResult.value.data.roamingSize += newItem.size;
+          }
+        }
+      } else if (event.type === 'DirectoryCompleted') {
+        ElMessage.success(`${event.name} 目录扫描完成，发现 ${event.itemCount} 个项目`);
+      } else if (event.type === 'ScanCompleted') {
+        // 扫描完成
+        progress.value = 100;
+        progressStatus.value = 'success';
+        ElMessage.success(`AppData扫描完成！共发现 ${event.totalItems} 个项目`);
+        
+        // 获取可用盘符
+        loadAvailableDrives();
+      } else if (event.type === 'ScanError') {
+        console.error('扫描错误:', event.error);
+        ElMessage.error(`扫描错误: ${event.error}`);
+      }
+    });
+    
+    console.log('流式扫描完成，最终结果:', result);
     
     if (result) {
-      ElMessage.success('AppData扫描完成！');
-      progress.value = 100;
-      progressStatus.value = 'success';
+      scanResult.value = {
+        success: true,
+        data: result,
+        timestamp: Date.now()
+      };
       largeItemsFound.value = result.largeItems.length;
-      
-      // 获取可用盘符
-      await loadAvailableDrives();
     }
   } catch (error) {
     console.error('扫描错误:', error);
@@ -506,23 +567,6 @@ async function refreshScan() {
   await startScan();
 }
 
-// 方法：模拟进度
-function simulateProgress() {
-  let currentProgress = 0;
-  const interval = setInterval(() => {
-    if (!scanning.value) {
-      clearInterval(interval);
-      return;
-    }
-    
-    currentProgress += Math.random() * 10;
-    if (currentProgress >= 90) {
-      currentProgress = 90; // 保持90%直到真实结果返回
-    }
-    
-    progress.value = Math.min(currentProgress, 100);
-  }, 800);
-}
 
 // 方法：切换项目选择
 function toggleItemSelection(item: AppDataFirstLevelItem) {

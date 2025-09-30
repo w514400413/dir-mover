@@ -5,6 +5,7 @@ use std::time::Instant;
 use std::collections::HashMap;
 use log::{info, warn, error, debug};
 use serde::{Serialize, Deserialize};
+use tokio::sync::mpsc;
 
 use crate::disk_analyzer::{DiskAnalyzer};
 use crate::performance_optimizer::{PerformanceOptimizer, PerformanceConfig};
@@ -12,12 +13,16 @@ use crate::performance_optimizer::{PerformanceOptimizer, PerformanceConfig};
 /// AppData 分析器配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppDataConfig {
+    #[serde(rename = "minSizeThreshold")]
     pub min_size_threshold: u64,  // 最小大小阈值（默认1GB）
+    #[serde(rename = "maxDepth")]
     pub max_depth: usize,          // 最大扫描深度（默认2层）
+    #[serde(rename = "sortOrder")]
     pub sort_order: SortOrder,     // 排序方式
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SortOrder {
     Asc,
     Desc,
@@ -39,34 +44,261 @@ pub struct AppDataFirstLevelItem {
     pub path: String,
     pub name: String,
     pub size: u64,
+    #[serde(rename = "itemType")]
     pub item_type: String, // "directory" or "file"
+    #[serde(rename = "parentType")]
     pub parent_type: String, // "Local", "LocalLow", "Roaming"
+    #[serde(rename = "isLarge")]
     pub is_large: bool,
+    #[serde(rename = "sizePercentage")]
     pub size_percentage: f64,
 }
 
 /// AppData 迁移选项
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppDataMigrationOptions {
+    #[serde(rename = "sourceItems")]
     pub source_items: Vec<String>, // 要迁移的项目路径列表
+    #[serde(rename = "targetDrive")]
     pub target_drive: String,      // 目标盘符（如"D:"）
+    #[serde(rename = "createSymlink")]
     pub create_symlink: bool,      // 是否创建符号链接
+    #[serde(rename = "deleteSource")]
     pub delete_source: bool,       // 是否删除源文件
 }
 
 /// AppData 信息结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppDataInfo {
+    #[serde(rename = "localPath")]
     pub local_path: String,
+    #[serde(rename = "localLowPath")]
     pub local_low_path: String,
+    #[serde(rename = "roamingPath")]
     pub roaming_path: String,
+    #[serde(rename = "localSize")]
     pub local_size: u64,
+    #[serde(rename = "localLowSize")]
     pub local_low_size: u64,
+    #[serde(rename = "roamingSize")]
     pub roaming_size: u64,
+    #[serde(rename = "totalSize")]
     pub total_size: u64,
+    #[serde(rename = "firstLevelItems")]
     pub first_level_items: Vec<AppDataFirstLevelItem>, // 三个目录下的一级子目录和文件
+    #[serde(rename = "largeItems")]
     pub large_items: Vec<AppDataFirstLevelItem>, // 1GB以上项目列表
+    #[serde(rename = "scanTimeMs")]
     pub scan_time_ms: u64,
+}
+
+/// 扫描事件类型 - 用于流式扫描
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum ScanEvent {
+    DirectoryStarted { name: String, path: String },
+    
+    ItemFound { item: AppDataFirstLevelItem },
+    
+    DirectoryCompleted { name: String, item_count: usize, total_size: u64 },
+    
+    ScanProgress { percentage: f64, current_path: String, items_found: usize },
+    
+    ScanCompleted { total_items: usize, total_size: u64, scan_time_ms: u64 },
+
+    ScanError { error: String, path: String },
+}
+
+/// 流式扫描器 - 支持并发扫描和实时事件推送
+pub struct StreamingAppDataScanner {
+    analyzer: AppDataAnalyzer,
+    event_tx: mpsc::UnboundedSender<ScanEvent>,
+}
+
+impl StreamingAppDataScanner {
+    /// 创建新的流式扫描器
+    pub fn new(analyzer: AppDataAnalyzer, event_tx: mpsc::UnboundedSender<ScanEvent>) -> Self {
+        Self { analyzer, event_tx }
+    }
+
+    /// 执行并发流式扫描
+    pub async fn scan_appdata_streaming(&self) -> Result<AppDataInfo, String> {
+        info!("开始并发流式扫描AppData目录");
+        let start_time = Instant::now();
+        
+        // 获取AppData路径
+        let appdata_path = AppDataAnalyzer::get_appdata_path()?;
+        
+        // 扫描三个主要子目录（并发执行，但实时推送事件）
+        let local_path = appdata_path.join("Local");
+        let local_low_path = appdata_path.join("LocalLow");
+        let roaming_path = appdata_path.join("Roaming");
+        
+        // 保存路径字符串用于最终结果
+        let local_path_str = local_path.to_string_lossy().to_string();
+        let local_low_path_str = local_low_path.to_string_lossy().to_string();
+        let roaming_path_str = roaming_path.to_string_lossy().to_string();
+        
+        // 创建并发任务，每个任务都有自己的事件发送器
+        let (tx1, mut rx1) = mpsc::unbounded_channel::<ScanEvent>();
+        let (tx2, mut rx2) = mpsc::unbounded_channel::<ScanEvent>();
+        let (tx3, mut rx3) = mpsc::unbounded_channel::<ScanEvent>();
+        
+        let main_tx = self.event_tx.clone();
+        
+        // 启动事件转发任务
+        let forward_task = tokio::spawn(async move {
+            let mut total_items = 0;
+            let mut total_size = 0u64;
+            
+            // 转发Local事件
+            while let Some(event) = rx1.recv().await {
+                if let ScanEvent::ItemFound { .. } = &event {
+                    total_items += 1;
+                }
+                if let Err(_) = main_tx.send(event) {
+                    break;
+                }
+            }
+            
+            // 转发LocalLow事件
+            while let Some(event) = rx2.recv().await {
+                if let ScanEvent::ItemFound { ref item } = &event {
+                    total_items += 1;
+                    total_size += item.size;
+                }
+                if let Err(_) = main_tx.send(event) {
+                    break;
+                }
+            }
+            
+            // 转发Roaming事件
+            while let Some(event) = rx3.recv().await {
+                if let ScanEvent::ItemFound { ref item } = &event {
+                    total_items += 1;
+                    total_size += item.size;
+                }
+                if let Err(_) = main_tx.send(event) {
+                    break;
+                }
+            }
+            
+            (total_items, total_size)
+        });
+        
+        // 创建并发扫描任务
+        let analyzer_clone = self.analyzer.clone();
+        let local_task = tokio::spawn(async move {
+            Self::scan_directory_with_events(&analyzer_clone, &local_path, "Local", tx1).await
+        });
+        
+        let analyzer_clone = self.analyzer.clone();
+        let local_low_task = tokio::spawn(async move {
+            Self::scan_directory_with_events(&analyzer_clone, &local_low_path, "LocalLow", tx2).await
+        });
+        
+        let analyzer_clone = self.analyzer.clone();
+        let roaming_task = tokio::spawn(async move {
+            Self::scan_directory_with_events(&analyzer_clone, &roaming_path, "Roaming", tx3).await
+        });
+        
+        // 等待所有扫描任务完成
+        let (local_result, local_low_result, roaming_result, forward_result) = tokio::join!(
+            local_task,
+            local_low_task,
+            roaming_task,
+            forward_task
+        );
+        
+        // 处理结果
+        let (local_items, local_size) = local_result.map_err(|e| format!("Local扫描任务失败: {}", e))??;
+        let (local_low_items, local_low_size) = local_low_result.map_err(|e| format!("LocalLow扫描任务失败: {}", e))??;
+        let (roaming_items, roaming_size) = roaming_result.map_err(|e| format!("Roaming扫描任务失败: {}", e))??;
+        let (total_items, _total_size) = forward_result.map_err(|e| format!("事件转发任务失败: {}", e))?;
+        
+        // 发送扫描完成事件
+        let scan_time_ms = start_time.elapsed().as_millis() as u64;
+        let total_size = local_size + local_low_size + roaming_size;
+        
+        self.event_tx.send(ScanEvent::ScanCompleted {
+            total_items: total_items,
+            total_size,
+            scan_time_ms,
+        }).map_err(|e| format!("发送完成事件失败: {}", e))?;
+        
+        // 合并所有结果
+        let mut all_items = Vec::new();
+        all_items.extend(local_items);
+        all_items.extend(local_low_items);
+        all_items.extend(roaming_items);
+        
+        Ok(AppDataInfo {
+            local_path: local_path_str,
+            local_low_path: local_low_path_str,
+            roaming_path: roaming_path_str,
+            local_size,
+            local_low_size,
+            roaming_size,
+            total_size,
+            first_level_items: all_items.clone(),
+            large_items: all_items.into_iter()
+                .filter(|item| item.size >= self.analyzer.config.min_size_threshold)
+                .collect(),
+            scan_time_ms,
+        })
+    }
+    
+    /// 扫描单个目录并发送事件
+    async fn scan_directory_with_events(
+        analyzer: &AppDataAnalyzer,
+        path: &Path,
+        parent_type: &str,
+        event_tx: mpsc::UnboundedSender<ScanEvent>,
+    ) -> Result<(Vec<AppDataFirstLevelItem>, u64), String> {
+        
+        // 发送目录开始事件
+        event_tx.send(ScanEvent::DirectoryStarted {
+            name: parent_type.to_string(),
+            path: path.display().to_string(),
+        }).map_err(|e| format!("发送目录开始事件失败: {}", e))?;
+        
+        let mut items = Vec::new();
+        let mut total_size = 0u64;
+        
+        // 扫描目录内容
+        match analyzer.scan_first_level_items(path, parent_type).await {
+            Ok((dir_items, dir_size)) => {
+                total_size = dir_size;
+                
+                // 逐个发送项目发现事件
+                for item in &dir_items {
+                    event_tx.send(ScanEvent::ItemFound {
+                        item: item.clone(),
+                    }).map_err(|e| format!("发送项目发现事件失败: {}", e))?;
+                }
+                
+                items = dir_items;
+            }
+            Err(e) => {
+                // 发送扫描错误事件
+                event_tx.send(ScanEvent::ScanError {
+                    error: e.clone(),
+                    path: path.display().to_string(),
+                }).map_err(|e| format!("发送错误事件失败: {}", e))?;
+                
+                return Err(e);
+            }
+        }
+        
+        // 发送目录完成事件
+        event_tx.send(ScanEvent::DirectoryCompleted {
+            name: parent_type.to_string(),
+            item_count: items.len(),
+            total_size,
+        }).map_err(|e| format!("发送目录完成事件失败: {}", e))?;
+        
+        Ok((items, total_size))
+    }
 }
 
 /// 缓存的扫描结果

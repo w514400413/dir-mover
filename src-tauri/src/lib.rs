@@ -12,7 +12,7 @@ mod appdata_analyzer;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::State;
+use tauri::{State, Emitter};
 use log::{info, error, warn};
 
 use disk_analyzer::{DiskAnalyzer, DirectoryInfo, format_file_size};
@@ -21,7 +21,7 @@ use migration_service::{MigrationService, MigrationOptions, MigrationResult, val
 use operation_logger::{OperationLogger, OperationStatistics};
 use performance_optimizer::{PerformanceOptimizer, PerformanceConfig};
 use types::PathValidationResult;
-use appdata_analyzer::{AppDataAnalyzer, AppDataInfo, AppDataConfig, AppDataMigrationOptions};
+use appdata_analyzer::{AppDataAnalyzer, AppDataInfo, AppDataConfig, AppDataMigrationOptions, ScanEvent, StreamingAppDataScanner};
 
 /// 应用状态
 struct AppState {
@@ -514,6 +514,7 @@ pub fn run() {
             run_memory_cleanup,
             get_performance_benchmark,
             scan_appdata,
+            scan_appdata_streaming,
             get_appdata_path,
             migrate_appdata_items,
             get_available_drives,
@@ -749,4 +750,85 @@ fn get_appdata_path() -> Result<String, String> {
             Err(format!("获取AppData路径失败: {}", e))
         }
     }
+}
+
+/// 流式扫描AppData目录 - 使用Tauri事件系统实现实时推送
+#[tauri::command]
+async fn scan_appdata_streaming(
+    config: Option<AppDataConfig>,
+    window: tauri::Window,
+    _state: State<'_, AppState>
+) -> Result<AppDataInfo, String> {
+    info!("收到流式扫描AppData目录请求");
+    
+    let mut analyzer = AppDataAnalyzer::new();
+    
+    // 应用配置（如果有）
+    if let Some(config) = config.clone() {
+        let min_size = config.min_size_threshold;
+        let max_depth = config.max_depth;
+        let sort_order = config.sort_order.clone();
+        
+        analyzer.set_config(config);
+        info!("应用自定义配置: min_size_threshold={}, max_depth={}, sort_order={:?}",
+              min_size, max_depth, sort_order);
+    }
+    
+    // 创建事件通道
+    let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<ScanEvent>();
+    let streaming_scanner = StreamingAppDataScanner::new(analyzer, event_tx);
+    
+    // 启动事件转发任务 - 将扫描事件转发到Tauri前端
+    let window_clone = window.clone();
+    let event_forward_task = tokio::spawn(async move {
+        while let Some(event) = event_rx.recv().await {
+            // 将扫描事件发送到前端
+            if let Err(e) = window_clone.emit("appdata-scan-event", &event) {
+                error!("发送扫描事件到前端失败: {}", e);
+                break;
+            }
+            
+            // 添加小延迟避免事件发送过快
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+    });
+    
+    info!("开始流式扫描AppData目录");
+    
+    // 执行流式扫描
+    let scan_result = streaming_scanner.scan_appdata_streaming().await;
+    
+    // 等待事件转发任务完成
+    if let Err(e) = event_forward_task.await {
+        error!("事件转发任务失败: {}", e);
+    }
+    
+    match &scan_result {
+        Ok(result) => {
+            info!("流式AppData扫描完成 - 总大小: {}, 一级项目数量: {}, 大项目数量: {}, 耗时: {}ms",
+                  format_file_size(result.total_size),
+                  result.first_level_items.len(),
+                  result.large_items.len(),
+                  result.scan_time_ms);
+            
+            // 发送最终的扫描完成事件
+            let _ = window.emit("appdata-scan-complete", &serde_json::json!({
+                "success": true,
+                "total_items": result.first_level_items.len(),
+                "total_size": result.total_size,
+                "scan_time_ms": result.scan_time_ms
+            }));
+        }
+        Err(e) => {
+            error!("流式AppData扫描失败: {}", e);
+            
+            // 发送扫描失败事件
+            let _ = window.emit("appdata-scan-error", &serde_json::json!({
+                "success": false,
+                "error": e.to_string()
+            }));
+        }
+    }
+    
+    scan_result
 }

@@ -502,6 +502,118 @@ export const appDataAPI = {
   },
 
   /**
+   * 流式扫描AppData目录 - 支持实时进度推送
+   * @param options 扫描选项（可选）
+   * @param onEvent 扫描事件回调函数
+   * @returns AppData信息
+   */
+  async scanAppDataStreaming(
+    options?: AppDataScanOptions,
+    onEvent?: (event: any) => void
+  ): Promise<AppDataInfo> {
+    console.log('API: 开始流式扫描AppData目录', options);
+    
+    try {
+      // 设置事件监听器
+      if (onEvent) {
+        // 监听扫描事件
+        const unlistenScan = await (window as any).addEventListener('appdata-scan-event', (event: any) => {
+          onEvent(event.payload);
+        });
+        
+        // 监听扫描完成事件
+        const unlistenComplete = await (window as any).addEventListener('appdata-scan-complete', (event: any) => {
+          onEvent({ type: 'scan_complete', data: event.payload });
+        });
+        
+        // 监听扫描错误事件
+        const unlistenError = await (window as any).addEventListener('appdata-scan-error', (event: any) => {
+          onEvent({ type: 'scan_error', data: event.payload });
+        });
+        
+        // 构建配置参数
+        const config: AppDataConfig = {
+          minSizeThreshold: options?.minSizeThreshold || 1024 * 1024 * 1024, // 默认1GB
+          maxDepth: options?.maxDepth || 2, // 默认2层
+          sortOrder: options?.sortOrder || 'desc' // 默认降序
+        };
+
+        try {
+          const result = await invoke<AppDataInfo>("scan_appdata_streaming", { config });
+          console.log('API: 流式AppData扫描成功', result);
+          
+          // 清理事件监听器
+          try {
+            if (unlistenScan && typeof unlistenScan === 'function') {
+              unlistenScan();
+            }
+          } catch (e) {
+            console.warn('清理扫描事件监听器失败:', e);
+          }
+          
+          try {
+            if (unlistenComplete && typeof unlistenComplete === 'function') {
+              unlistenComplete();
+            }
+          } catch (e) {
+            console.warn('清理完成事件监听器失败:', e);
+          }
+          
+          try {
+            if (unlistenError && typeof unlistenError === 'function') {
+              unlistenError();
+            }
+          } catch (e) {
+            console.warn('清理错误事件监听器失败:', e);
+          }
+          
+          return result;
+        } catch (error) {
+          // 清理事件监听器
+          try {
+            if (unlistenScan && typeof unlistenScan === 'function') {
+              unlistenScan();
+            }
+          } catch (e) {
+            console.warn('清理扫描事件监听器失败:', e);
+          }
+          
+          try {
+            if (unlistenComplete && typeof unlistenComplete === 'function') {
+              unlistenComplete();
+            }
+          } catch (e) {
+            console.warn('清理完成事件监听器失败:', e);
+          }
+          
+          try {
+            if (unlistenError && typeof unlistenError === 'function') {
+              unlistenError();
+            }
+          } catch (e) {
+            console.warn('清理错误事件监听器失败:', e);
+          }
+          throw error;
+        }
+      } else {
+        // 无事件回调的简单扫描
+        const config: AppDataConfig = {
+          minSizeThreshold: options?.minSizeThreshold || 1024 * 1024 * 1024,
+          maxDepth: options?.maxDepth || 2,
+          sortOrder: options?.sortOrder || 'desc'
+        };
+
+        const result = await invoke<AppDataInfo>("scan_appdata_streaming", { config });
+        console.log('API: 流式AppData扫描成功', result);
+        return result;
+      }
+    } catch (error) {
+      console.error("API: 流式AppData扫描失败:", error);
+      throw new Error(`流式AppData扫描失败: ${error}`);
+    }
+  },
+
+  /**
    * 获取AppData路径
    * @returns AppData路径
    */
